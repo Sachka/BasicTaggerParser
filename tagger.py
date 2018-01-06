@@ -56,6 +56,13 @@ class NNTagger(object) :
 		self.NB_DIMS = 42
 		#pass
 
+	def __data_to_matrix(self, data) :
+		X, Y = numpy.zeros((len(data[0]), self.MAX_SENTENCE_LEN), dtype='float32'), numpy.zeros((len(data[1]), self.MAX_SENTENCE_LEN), dtype='float32')
+		for i in range(len(data[0])) :
+			for j in range(len(data[0][i])) :
+				X[i,j] = self.word_index[data[0][i][j]] if data[0][i][j] in self.word_index else len(self.word_index)
+				Y[i,j] = self.class_index[data[1][i][j]] if data[1][i][j] in self.class_index else len(self.class_index)
+		return X, Y
 	def __make_dataset(self, filename) :
 		data = corpus.extract(corpus.load(filename))
 		self.MAX_SENTENCE_LEN = max(map(len, data[0]))
@@ -67,12 +74,7 @@ class NNTagger(object) :
 		self.class_index = {c : i for i, c in enumerate(self.classes)}
 		self.index_class = dict(enumerate(self.classes))
 		self.CLASSES_SIZE = len(self.classes)
-		X, Y = numpy.zeros((len(data[0]), self.MAX_SENTENCE_LEN), dtype='float32'), numpy.zeros((len(data[1]), self.MAX_SENTENCE_LEN), dtype='float32')
-		for i in range(len(data[0])) :
-			for j in range(len(data[0][i])) :
-				X[i,j] = self.word_index[data[0][i][j]]
-				Y[i,j] = self.class_index[data[1][i][j]]
-		return X, Y
+		return self.__data_to_matrix(data)
 
 	def train(self, filename, **kwargs) :
 		X, Y = self.__make_dataset(filename)
@@ -82,19 +84,29 @@ class NNTagger(object) :
 		output_layer = Dense(self.MAX_SENTENCE_LEN, activation='softmax')(recurrent_layer)
 		self.model = Model(input_layer, output_layer)
 		self.model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
-		self.model.fit(X, Y, batch_size=64, epochs=100, validation_split=0.2)
+		self.model.fit(X, Y, batch_size=64, epochs=10, validation_split=0.2)
 
 	def tag(self, wordlist) :
-		data = numpy.zeros((MAX_SENTENCE_LEN,), dtype='float32')
+		data = numpy.zeros(self.MAX_SENTENCE_LEN, dtype='float32')
+		print(data.shape)
 		for i, word in enumerate(wordlist) :
-			data[i] = self.word_index[word] 
+			data[i] = self.word_index[word] if word in self.word_index else len(self.word_index)
 		return [self.index_class[i] for i in self.model.predict(data)][:len(word_list)]
 	def predict(self, wordlist) :
 		return self.tag(wordlist)
-	def test(self, corpus) :
-		pass
+	def test(self, data) :
+		X, Y =  self.__data_to_matrix(data)
+		acc, total = 0., 0.
+		for i, sentence in enumerate(X) :
+			gold, pred = Y[i], self.predict(sentence)
+			length = len(data[0][i])
+			acc += sum(int(gold[j] == pred[j]) for j in range(length))
+			total += length
+		return acc/total
 
 if __name__ == "__main__" :
-	filename="sequoia-corpus.np_conll.dev"
-	NNTagger("foo").train(filename)
+	filename="sequoia-corpus.np_conll.train"
+	tagger = NNTagger("foo")
+	tagger.train(filename)
+	print(tagger.test("sequoia-corpus.np_conll.test"))
 
