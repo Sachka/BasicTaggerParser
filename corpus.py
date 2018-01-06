@@ -1,18 +1,15 @@
-def split(filename):
-    corpus = []
-    with open(filename, "r") as file:
-        corpus = [line.strip() for line in file.readlines()]
-    trainc = corpus[:int(len(corpus) * 0.8)]
-    testc = corpus[int(len(corpus) * 0.8):int(len(corpus) * 0.9)]
-    devc = corpus[int(len(corpus) * 0.9):]
-    with open(filename + ".train", "w") as train_output:
-        for line in trainc:
-            train_output.write("%s\n" % line)
-    with open(filename + ".test", "w") as test_output:
-        for line in testc:
-            test_output.write("%s\n" % line)
-    with open(filename + ".dev", "w") as devc_output:
-        for line in devc:
-            devc_output.write("%s\n" % line)
 
-split("sequoia-corpus.np_conll")
+def split(filename, proportions=(("train", .8), ("dev", .1), ("test", .1))) :
+	with open(filename, "r") as i :
+		text = [s.split("\n") for s in i.read().split("\n\n")]
+	size = len(text)
+	start = 0
+	for p in proportions :
+		end = int(start + p[1]*size)
+		with open(filename+"."+p[0], "w") as o :
+			o.write("\n\n".join(["\n".join(s) for s in text[start:end]]))
+		start = end
+	return tuple([filename+"."+p[0] for p in proportions])
+
+if __name__ == "__main__" :
+	split("sequoia-corpus.np_conll")
