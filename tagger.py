@@ -2,7 +2,7 @@ import corpus
 
 import numpy
 from keras.models import Model
-from keras.layers import Input, Dense, Activation, Embedding, LSTM, TimeDistributed, Bidirectional
+from keras.layers import Input, Dense, Activation, Embedding, LSTM, TimeDistributed, Bidirectional, Flatten
 from keras.optimizers import Adam
 from keras.preprocessing.sequence import pad_sequences
 
@@ -60,17 +60,19 @@ class NNTagger(object) :
 		X, Y = numpy.zeros((len(data[0]), self.MAX_SENTENCE_LEN), dtype='float32'), numpy.zeros((len(data[1]), self.MAX_SENTENCE_LEN), dtype='float32')
 		for i in range(len(data[0])) :
 			for j in range(len(data[0][i])) :
-				X[i,j] = self.word_index[data[0][i][j]] if data[0][i][j] in self.word_index else len(self.word_index)
-				Y[i,j] = self.class_index[data[1][i][j]] if data[1][i][j] in self.class_index else len(self.class_index)
+				X[i,j] = self.word_index[data[0][i][j]] if data[0][i][j] in self.word_index else self.word_index["__UNK__"]
+				Y[i,j] = self.class_index[data[1][i][j]] if data[1][i][j] in self.class_index else self.class_index["__UNK__"]
 		return X, Y
 	def __make_dataset(self, filename) :
 		data = corpus.extract(corpus.load(filename))
 		self.MAX_SENTENCE_LEN = max(map(len, data[0]))
 		self.vocab = list({w for s in data[0] for w in s})
+		self.vocab += ["__UNK__"]
 		self.word_index = {w : i for i, w in enumerate(self.vocab)}
 		self.index_word = dict(enumerate(self.vocab))
 		self.VOC_SIZE = len(self.vocab)
 		self.classes = list({t for s in data[1] for t in s})
+		self.classes += ["__UNK__"]
 		self.class_index = {c : i for i, c in enumerate(self.classes)}
 		self.index_class = dict(enumerate(self.classes))
 		self.CLASSES_SIZE = len(self.classes)
@@ -80,11 +82,12 @@ class NNTagger(object) :
 		X, Y = self.__make_dataset(filename)
 		input_layer = Input(shape=(self.MAX_SENTENCE_LEN,))
 		embedding_layer = Embedding(input_dim=self.VOC_SIZE, input_length=self.MAX_SENTENCE_LEN, output_dim=self.NB_DIMS)(input_layer)
-		recurrent_layer = LSTM(self.NB_DIMS)(embedding_layer)
-		output_layer = Dense(self.MAX_SENTENCE_LEN, activation='softmax')(recurrent_layer)
+		recurrent_layer1 = LSTM(self.NB_DIMS, input_shape=(self.MAX_SENTENCE_LEN, self.VOC_SIZE), return_sequences=True)(embedding_layer)
+		recurrent_layer2 = LSTM(self.NB_DIMS, input_shape=(self.MAX_SENTENCE_LEN, self.VOC_SIZE))(recurrent_layer1)
+		output_layer = Dense(self.MAX_SENTENCE_LEN, activation='softmax')(recurrent_layer2)
 		self.model = Model(input_layer, output_layer)
-		self.model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
-		self.model.fit(X, Y, batch_size=64, epochs=10, validation_split=0.2)
+		self.model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
+		self.model.fit(X, Y, batch_size=64, epochs=100, validation_split=0.2)
 
 	def tag(self, wordlist) :
 		data = numpy.zeros(self.MAX_SENTENCE_LEN, dtype='float32')
@@ -96,13 +99,7 @@ class NNTagger(object) :
 		return self.tag(wordlist)
 	def test(self, data) :
 		X, Y =  self.__data_to_matrix(data)
-		acc, total = 0., 0.
-		for i, sentence in enumerate(X) :
-			gold, pred = Y[i], self.predict(sentence)
-			length = len(data[0][i])
-			acc += sum(int(gold[j] == pred[j]) for j in range(length))
-			total += length
-		return acc/total
+		return self.model.evaluate(X, Y, batch_size=64)
 
 if __name__ == "__main__" :
 	filename="sequoia-corpus.np_conll.train"
