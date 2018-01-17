@@ -514,30 +514,30 @@ class ArcStandardTransitionParser:
                 return
 
             
-test = """
-1 le   D     2
-2 chat N     3
-3 dort V     0
-4 .    PONCT 3
-"""
-test2 = """
-1 le      D     2
-2 tapis   N     3
-3 est     V     5
-4 rouge   A     3
-5 et      CC    0
-6 le      D     7
-7 chat    N     8
-8 mange   V     5
-9 la      D     10
-10 souris N     8
-11 .      PONCT 5
-"""
+# test = """
+# 1 le   D     2
+# 2 chat N     3
+# 3 dort V     0
+# 4 .    PONCT 3
+# """
+# test2 = """
+# 1 le      D     2
+# 2 tapis   N     3
+# 3 est     V     5
+# 4 rouge   A     3
+# 5 et      CC    0
+# 6 le      D     7
+# 7 chat    N     8
+# 8 mange   V     5
+# 9 la      D     10
+# 10 souris N     8
+# 11 .      PONCT 5
+# """
 
-istream = io.StringIO(test)
-istream2 =  io.StringIO(test2)
-d = DependencyTree.read_tree(istream)
-d2 = DependencyTree.read_tree(istream2)
-p = ArcStandardTransitionParser()
-p.train([d,d2],max_epochs=100,beam_size=4)
-print(p.test([d,d2],beam_size=4))
+# istream = io.StringIO(test)
+# istream2 =  io.StringIO(test2)
+# d = DependencyTree.read_tree(istream)
+# d2 = DependencyTree.read_tree(istream2)
+# p = ArcStandardTransitionParser()
+# p.train([d,d2],max_epochs=100,beam_size=4)
+# print(p.test([d,d2],beam_size=4))
