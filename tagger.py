@@ -7,6 +7,7 @@ import numpy
 from keras.models import Model
 from keras.layers import Input, Dense, Embedding, LSTM, TimeDistributed
 from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
+from keras.regularizers import l1, l2, l1_l2
 from keras.preprocessing.sequence import pad_sequences
 
 class NNTagger(object) :
@@ -26,7 +27,7 @@ class NNTagger(object) :
 			Ycodes.append(ymat)
 		return Xcodes, Ycodes
 
-	def train(self, filename, epochs=20, batch_size=64, verbose=0, optimizer=Adam(lr=.01), **kwargs) :
+	def train(self, filename, epochs=20, batch_size=64, verbose=0, optimizer=RMSprop(lr=.001), **kwargs) :
 		X, Y = corpus.extract(corpus.load(filename))
 		self.x_list = list({w for x in X for w in x}) + ["__UNK__"]
 		self.y_list = list({c for y in Y for c in y}) + ["__UNK__"]
@@ -40,13 +41,13 @@ class NNTagger(object) :
 		self.x_size = len(self.x_codes)
 		self.y_size = len(self.y_codes)
 		ipt = Input(shape=(self.mL,))
-		e = Embedding(self.x_size, self.embedding_size)(ipt)
+		e = Embedding(self.x_size, self.embedding_size, mask_zero=True)(ipt)
 		h = LSTM(self.memory_size, return_sequences=True)(e)
-		o = TimeDistributed(Dense(self.y_size, activation='softmax'))(h)
+		o = TimeDistributed(Dense(self.y_size, bias_regularizer=l1_l2(0.), activation='softmax'))(h)
 		self.model = Model(ipt, o)
 		if verbose : self.model.summary()
 		self.model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
-		self.model.fit(Xcodes, Ycodes, verbose=verbose, epochs=epochs, batch_size=batch_size)
+		self.model.fit(Xcodes, Ycodes, epochs=epochs, batch_size=batch_size)
 
 	def tag(self, wordlist) :
 		data = numpy.zeros(self.MAX_SENTENCE_LEN, dtype='float32')
@@ -66,8 +67,6 @@ class NNTagger(object) :
 		return self.model.evaluate(Xcodes_test, Ycodes_test, batch_size=64)
 
 if __name__ == "__main__" :
-	for epoch in range(20, 100, 10) :
-		for optimizer in [SGD(), Adam(), RMSprop(), Adadelta(), Adagrad(), Adamax(), Nadam()] :
-			tagger = NNTagger()
-			tagger.train("sequoia-corpus.np_conll.train", epochs=epoch, optimizer=optimizer)
-			print(epoch, optimizer, tagger.test("sequoia-corpus.np_conll.test"))
+	tagger = NNTagger()
+	tagger.train("sequoia-corpus.np_conll.train", verbose=1)
+	print(tagger.test("sequoia-corpus.np_conll.test"))
