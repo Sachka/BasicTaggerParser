@@ -79,7 +79,7 @@ class SparseWeightVector:
         w = SparseWeightVector()
         w.weights = weights
         return w
-     
+
     def __mul__(self,scalar):
     	
         weights =  self.weights.copy() 
@@ -234,6 +234,354 @@ class DependencyTree:
         """
         return self.tokens[idx]
 
+class ArcEagerTransitionParser:
+
+    #actions
+    LEFTARC  = "LA"
+    RIGHTARC = "RA"
+    SHIFT    = "S"
+    REDUCE   = "R"
+    TERMINATE= "T"
+    
+    def __init__(self):
+        self.model = SparseWeightVector()
+        
+    @staticmethod
+    def static_oracle(configuration,reference_arcs,N):
+        """
+        @param configuration: a parser configuration
+        @param reference arcs: a set of dependency arcs
+        @param N: the length of the input sequence
+        @return the action to execute given config and reference arcs
+        """
+        S,B,A,score = configuration
+        all_words   = range(N)
+        
+        if S and B:
+            i,j = S[-1], B[0]
+            if i!= 0 and (j,i) in reference_arcs:
+                return ArcEagerTransitionParser.LEFTARC
+            if  (i,j) in reference_arcs:
+                return ArcEagerTransitionParser.RIGHTARC
+        if S and any([(k,S[-1]) in A for k in all_words])\
+            and all ([(S[-1],k) in A for k in all_words if (S[-1],k) in reference_arcs]):
+            return ArcEagerTransitionParser.REDUCE
+        if B:
+            return ArcEagerTransitionParser.SHIFT
+        return ArcEagerTransitionParser.TERMINATE
+
+    @staticmethod
+    def dynamic_oracle(configuration,action,reference_arcs):
+        """
+        Computes the cost of an action given a configuration and a reference tree
+        @param configuration: a parser configuration tuple
+        @param reference_arcs a set of dependencies
+        @return a bool set to true if cost = 0 , false otherwise (cost > 0 or impossible action)
+        """
+        S,B,A,score = configuration
+        if S and B:
+            i,j = S[-1],B[0]
+            if action == ArcEagerTransitionParser.LEFTARC:
+                if any ([(k,i) in reference_arcs for k in B[1:]]):
+                    return False
+                if any([(i,k) in reference_arcs for k in B]):
+                    return False
+                return True
+            elif action == ArcEagerTransitionParser.RIGHTARC:
+                if any([(k,j) in reference_arcs for k in B]):
+                    return False
+                if any([(k,j) in reference_arcs for k in S[:-1]]):
+                    return False
+                if any([(j,k) in reference_arcs for k in S]):
+                    return False
+                return True
+        if S:
+            if action == ArcEagerTransitionParser.REDUCE:
+                if any([(i,k) in reference_arcs for k in B]):
+                    return False
+                return True
+
+        if B:
+            if action == ArcEagerTransitionParser.SHIFT:
+                if any([(j,k) in reference_arcs or (k,j) in reference_arcs for k in S]):
+                    return False
+                return True
+        if not B and action == ArcEagerTransitionParser.TERMINATE:
+            return True
+        
+        return False
+
+            
+    def static_oracle_derivation(self,ref_parse):
+        """
+        This generates a static oracle reference derivation from a sentence
+        @param ref_parse: a DependencyTree object
+        @return : the oracle derivation as a list of (Configuration,action,toklist) triples
+        """
+        sentence = ref_parse.tokens
+        edges    = set(ref_parse.edges)
+        N        = len(sentence)
+        
+        C = ((0,),tuple(range(1,len(sentence))),tuple(),0.0)       #A config is a hashable quadruple with score 
+        action = ArcEagerTransitionParser.static_oracle(C,edges,N)
+        derivation = [ (C,action,sentence) ]
+
+        while C[1] and action != ArcEagerTransitionParser.TERMINATE:
+            #print(C,action)
+            if action ==  ArcEagerTransitionParser.SHIFT:
+                C = self.shift(C,sentence)
+            elif action == ArcEagerTransitionParser.LEFTARC:
+                C = self.leftarc(C,sentence)
+            elif action == ArcEagerTransitionParser.RIGHTARC:
+                C = self.rightarc(C,sentence)
+            elif action == ArcEagerTransitionParser.REDUCE:
+                C = self.reduce_config(C,sentence)
+            elif action ==  ArcEagerTransitionParser.TERMINATE:
+                C = self.terminate(C,sentence)
+
+            action = ArcEagerTransitionParser.static_oracle(C,edges,N)
+            derivation.append((C,action,sentence))
+                            
+        return derivation
+                
+    def shift(self,configuration,tokens):
+        """
+        Performs the shift action and returns a new configuration
+        """
+        S,B,A,score = configuration
+        w0 = B[0]
+        return (S + (w0,),B[1:],A,score+self.score(configuration,ArcEagerTransitionParser.SHIFT,tokens)) 
+
+    def leftarc(self,configuration,tokens):
+        """
+        Performs the left arc action and returns a new configuration
+        """
+        S,B,A,score = configuration
+        i,j = S[-1],B[0]
+        return (S[:-1],B,A + ((j,i),),score+self.score(configuration,ArcEagerTransitionParser.LEFTARC,tokens)) 
+
+    def rightarc(self,configuration,tokens):
+        S,B,A,score = configuration
+        i,j = S[-1],B[0]
+        return (S+(j,),B[1:], A + ((i,j),),score+self.score(configuration,ArcEagerTransitionParser.RIGHTARC,tokens)) 
+
+    def reduce_config(self,configuration,tokens):
+        S,B,A,score = configuration
+        return (S[:-1],B,A,score+self.score(configuration,ArcEagerTransitionParser.REDUCE,tokens))
+    
+    def terminate(self,configuration,tokens):
+        S,B,A,score = configuration
+        return (S,B,A,score+self.score(configuration,ArcEagerTransitionParser.TERMINATE,tokens))        
+
+    def predict_local(self,configuration,sentence,allowed=None):
+        """
+        Statistical prediction of an action given a configuration
+        @param configuration: a tuple (S,B,A,score)
+        @param sentence: a list of tokens
+        @param allowed:  a list of allowed actions
+        @return (new_config,action_performed)
+        """
+        action_set = set([ArcEagerTransitionParser.LEFTARC,ArcEagerTransitionParser.RIGHTARC,\
+                          ArcEagerTransitionParser.SHIFT,ArcEagerTransitionParser.REDUCE,\
+                          ArcEagerTransitionParser.TERMINATE])
+        if allowed :
+            action_set = set(allowed)
+        
+        N = len(sentence)
+        S,B,A,score = configuration
+        candidates = []
+        if B and ArcEagerTransitionParser.SHIFT in action_set :
+            candidates.append((self.shift(configuration,sentence),ArcEagerTransitionParser.SHIFT))
+            
+        if S and ArcEagerTransitionParser.REDUCE in action_set:
+            i = S[-1]    
+            if any([(k,i) in A for k in range(N)]):
+                candidates.append((self.reduce_config(configuration,sentence),ArcEagerTransitionParser.REDUCE))
+
+        if S and B:
+            if ArcEagerTransitionParser.LEFTARC in action_set:
+                i = S[-1]     
+                if i != 0 and not any([(k,i) in A for k in range(N)]): 
+                    candidates.append((self.leftarc(configuration,sentence),ArcEagerTransitionParser.LEFTARC))
+            if ArcEagerTransitionParser.RIGHTARC in action_set:
+                j = B[0]
+                if not any([(k,j) in A for k in range(N)]):
+                    candidates.append((self.rightarc(configuration,sentence),ArcEagerTransitionParser.RIGHTARC))
+
+        if not B and ArcEagerTransitionParser.TERMINATE in action_set:
+            candidates.append((self.terminate(configuration,sentence),ArcEagerTransitionParser.TERMINATE))
+
+        if candidates:
+            candidates.sort(key=lambda x:x[0][3],reverse=True)
+            return candidates[0]    
+        else: #emergency exit when we have no candidate
+            return (C,ArcEagerTransitionParser.TERMINATE)
+
+    def parse_one(self,sentence):
+        """
+        Greedy parsing
+        @param sentence: a list of tokens
+        """
+        N = len(sentence)
+        C = ((0,),tuple(range(1,N)),tuple(),0.0) #A config is a hashable quadruple with score 
+        action = None
+        while action != ArcEagerTransitionParser.TERMINATE:
+            C,action = self.predict_local(C,sentence)
+
+        #Connects any remaining dummy root to 0 
+        S,B,A,score = C
+        Aset = set(A)
+        for s in S:
+            if s!= 0 and not any([(k,s) in Aset for k in range(N)]):
+                Aset.add((0,s))
+        return DependencyTree(tokens=sentence,edges=list(Aset))
+
+
+    def score(self,configuration,action,tokens):
+        """
+        Computes the prefix score of a derivation
+        @param configuration : a quintuple (S,B,A,score,history)
+        @param action: an action label in {LEFTARC,RIGHTARC,REDUCE,TERMINATE,SHIFT}
+        @param tokens: the x-sequence of tokens to be parsed
+        @return a prefix score
+        """
+        S,B,A,old_score = configuration
+        config_repr = self.__make_config_representation(S,B,tokens)
+        return old_score + self.model.dot(config_repr,action)
+
+    def __make_config_representation(self,S,B,tokens):
+        """
+        This gathers the information for coding the configuration as a feature vector.
+        @param S: a configuration stack
+        @param B  a configuration buffer
+        @return an ordered list of tuples 
+        """
+        #default values for inaccessible positions
+        s0w,s1w,s0t,s1t,b0w,b1w,b0t,b1t = "_UNDEF_","_UNDEF_","_UNDEF_","_UNDEF_","_UNDEF_","_UNDEF_","_UNDEF_","_UNDEF_"
+
+        if len(S) > 0:
+            s0w,s0t = tokens[S[-1]][0],tokens[S[-1]][1]
+        if len(S) > 1:
+            s1w,s1t = tokens[S[-2]][0],tokens[S[-2]][1]
+        if len(B) > 0:
+            b0w,b0t = tokens[B[0]][0],tokens[B[0]][1]
+        if len(B) > 1:
+            b1w,b1t = tokens[B[1]][0],tokens[B[1]][1]
+            
+        wordlist = [s0w,s1w,b0w,b1w]
+        taglist  = [s0t,s1t,b0t,b1t]
+        word_bigrams = list(zip(wordlist,wordlist[1:]))
+        tag_bigrams = list(zip(taglist,taglist[1:]))
+        word_trigrams = list(zip(wordlist,wordlist[1:],wordlist[2:]))
+        tag_trigrams = list(zip(taglist,taglist[1:],taglist[2:]))
+        return word_bigrams + tag_bigrams + word_trigrams + tag_trigrams
+    
+    def test(self,dataset):
+        """
+        @param dataset: a list of DependencyTrees
+        @param beam_size: size of the beam
+        """
+        N       = len(dataset)
+        sum_acc = 0.0
+        for ref_tree in dataset:
+            tokens    = ref_tree.tokens
+            pred_tree = self.parse_one(tokens)
+            print(pred_tree)
+            print()
+            sum_acc   += ref_tree.accurracy(pred_tree)
+        return sum_acc/N
+
+    
+    def choose(self,pred_action,optimal_actions):
+        """
+        Choice function for dynamic oracle. Chooses next action in case of ambiguity.
+        (does not perform exploration) 
+        """
+        if pred_action in optimal_actions:
+            return pred_action
+        else:
+            return optimal_actions[randrange(0,len(optimal_actions))]
+        
+    def dynamic_train(self,treebank,step_size=1.0,max_epochs=100):
+
+        ACTIONS = [ArcEagerTransitionParser.LEFTARC,ArcEagerTransitionParser.RIGHTARC,\
+                   ArcEagerTransitionParser.SHIFT,ArcEagerTransitionParser.REDUCE,\
+                   ArcEagerTransitionParser.TERMINATE]
+        
+        N = len(treebank)
+        for e in range(max_epochs):
+            loss, total = 0,0
+            for dtree in treebank:
+                ref_arcs = set(dtree.edges)
+                n = len(dtree.tokens)
+                C = ((0,),tuple(range(1,n)),tuple(),0.0) #A config is a hashable quadruple with score 
+                action = None
+                while action != ArcEagerTransitionParser.TERMINATE:
+                    pred_config,pred_action = self.predict_local(C,dtree.tokens)
+                    optimal_actions = list([a for a in ACTIONS if self.dynamic_oracle(C,a,ref_arcs)])
+                    total += 1
+                    if pred_action not in optimal_actions:
+                        loss +=1
+                        optimal_config,optimal_action = self.predict_local(C,dtree.tokens,allowed=optimal_actions)
+                        delta_ref = SparseWeightVector()
+                        S,B,A,score = C
+                        x_repr = self.__make_config_representation(S,B,dtree.tokens)
+                        delta_ref += SparseWeightVector.code_phi(x_repr,optimal_action)
+
+                        delta_pred = SparseWeightVector()
+                        S,B,A,score = C
+                        x_repr = self.__make_config_representation(S,B,dtree.tokens)
+                        delta_pred += SparseWeightVector.code_phi(x_repr,pred_action)
+
+                        self.model += step_size*(delta_ref-delta_pred)
+                        
+                    action = self.choose(pred_action,optimal_actions)
+                
+                    if action ==  ArcEagerTransitionParser.SHIFT:
+                        C = self.shift(C,dtree.tokens)
+                    elif action == ArcEagerTransitionParser.LEFTARC:
+                        C = self.leftarc(C,dtree.tokens)
+                    elif action == ArcEagerTransitionParser.RIGHTARC:
+                        C = self.rightarc(C,dtree.tokens)
+                    elif action == ArcEagerTransitionParser.REDUCE:
+                        C = self.reduce_config(C,dtree.tokens)
+                    elif action ==  ArcEagerTransitionParser.TERMINATE:
+                        C = self.terminate(C,dtree.tokens)
+            print('Loss = ',loss, "%Local accurracy = ",(total-loss)/total)
+            if loss == 0.0:
+                return
+                            
+    def static_train(self,treebank,step_size=1.0,max_epochs=100):
+        """
+        Trains a model with a static oracle
+        @param treebank : a list of dependency trees
+        """
+        dataset = []
+        for dtree in treebank:
+            dataset.extend(self.static_oracle_derivation(dtree))
+        N = len(dataset)
+        for e in range(max_epochs):
+            loss = 0.0
+            for ref_config,ref_action,tokens in dataset:
+                pred_config,pred_action = self.predict_local(ref_config,tokens)
+                if ref_action != pred_action:
+                    loss += 1.0
+                    delta_ref = SparseWeightVector()
+                    S,B,A,score = ref_config
+                    x_repr = self.__make_config_representation(S,B,tokens)
+                    delta_ref += SparseWeightVector.code_phi(x_repr,ref_action)
+                                
+                    delta_pred = SparseWeightVector()
+                    S,B,A,score = ref_config
+                    x_repr = self.__make_config_representation(S,B,tokens)
+                    delta_pred += SparseWeightVector.code_phi(x_repr,pred_action)
+
+                    self.model += step_size*(delta_ref-delta_pred)
+            print('Loss = ',loss, "%Local accurracy = ",(N-loss)/N)
+            if loss == 0.0:
+                return
+
+
 class ArcStandardTransitionParser:
 
     #actions
@@ -368,7 +716,7 @@ class ArcStandardTransitionParser:
             print(beam[-1][0][1],succ)
             return DependencyTree(tokens=sentence,edges=succ[2])
 
-             
+
     def early_prefix(self,ref_parse,beam):
         """
         Finds the prefix for early update, that is the prefix where the ref parse fall off the beam.
@@ -512,32 +860,160 @@ class ArcStandardTransitionParser:
             print('Loss = ',loss, "%Exact match = ",(N-loss)/N)
             if loss == 0.0:
                 return
+class ArcFactoredParser:
+        
+    LEFTARC  = "L"
+    RIGHTARC = "R"
+    
+    def __init__(self):
+        
+        self.model = SparseWeightVector()
+
+
+    def _argmax(self,x,y,argmax,argvalue):
+        """
+        computes m = max(x,y) and updates prev argmax by argvalue if max(x,y) = y
+        @param x: number (current max)
+        @param y: number
+        @param argmax: the current argmax
+        @param argvalue: the potential argmax
+        @return (max,argmax) a couple with the current max and argmax
+        """
+        if y > x:
+            return (y,argvalue)
+        return (x,argmax)
+        
+        
+    def parse_one(self,sentence):
+        """
+        @param sentence: a list of tokens as encoded in a dependency
+        tree (first token is a dummy root token)
+        @return : a DependencyTree Object 
+        """
+        COMPLETE,INCOMPLETE  = 1,0
+        LEFTARROW,RIGHTARROW = 0,1
+        
+        N = len(sentence)
+        chart   = np.zeros((N,N,2,2))
+        history = {}
+
+        #recurrence
+        for span_length in range(1,N):
+            for i in range(N-span_length):
+                j = i + span_length
+                #incomplete
+                max_left,max_right = -inf,-inf
+                amax_left,amax_right = i,i
+                for k in range(i,j):
+                    tmp_score = chart[i][k][RIGHTARROW][COMPLETE] \
+                              + chart[k+1][j][LEFTARROW][COMPLETE] \
+                              + self.score(j,i,sentence) 
+                    max_left,amax_left  = self._argmax(max_left,tmp_score,amax_left,k)
+                    tmp_score = chart[i][k][RIGHTARROW][COMPLETE] \
+                              + chart[k+1][j][LEFTARROW][COMPLETE] \
+                              + self.score(i,j,sentence)
+                    max_right,amax_right = self._argmax(max_right,tmp_score,amax_right,k)                    
+                chart[i][j][LEFTARROW][INCOMPLETE]  = max_left
+                chart[i][j][RIGHTARROW][INCOMPLETE] = max_right
+                history[(i,j,LEFTARROW,INCOMPLETE)] = [(i,amax_left,RIGHTARROW,COMPLETE),(amax_left+1,j,LEFTARROW,COMPLETE)]
+                history[(i,j,RIGHTARROW,INCOMPLETE)]= [(i,amax_right,RIGHTARROW,COMPLETE),(amax_right+1,j,LEFTARROW,COMPLETE)]
+
+                #complete
+                max_left,max_right = -inf,-inf
+                amax_left,amax_right = i,i
+                for k in range(i,j):
+                    max_left,amax_left   = self._argmax(max_left,chart[i][k][LEFTARROW][COMPLETE] + chart[k][j][LEFTARROW][INCOMPLETE],amax_left,k)
+                for k in range(i+1,j+1):
+                    max_right,amax_right = self._argmax(max_right,chart[i][k][RIGHTARROW][INCOMPLETE] + chart[k][j][RIGHTARROW][COMPLETE],amax_right,k)
+                chart[i][j][LEFTARROW][COMPLETE]   = max_left
+                chart[i][j][RIGHTARROW][COMPLETE]  = max_right
+                history[(i,j,LEFTARROW,COMPLETE)]  = [(i,amax_left,LEFTARROW,COMPLETE),(amax_left,j,LEFTARROW,INCOMPLETE)]
+                history[(i,j,RIGHTARROW,COMPLETE)] = [(i,amax_right,RIGHTARROW,INCOMPLETE),(amax_right,j,RIGHTARROW,COMPLETE)]
+
+        #backtrace (collects edges of the dependency tree)
+        edges  = []
+        agenda = [(0,N-1,RIGHTARROW,COMPLETE)]
+        while agenda:
+            current_item = agenda.pop()
+            (i,j,direction,c) = current_item
+            if c == INCOMPLETE and i != j:
+                if direction == LEFTARROW:
+                    edges.append((j,i))
+                elif direction == RIGHTARROW:
+                    edges.append((i,j))
+            if current_item in history:
+                agenda.extend(history[current_item])
+        
+        return DependencyTree(tokens=sentence,edges=edges)
+                
+    def score(self,gov_idx,dep_idx,toklist):
+        """
+        @param gov_idx,dep_idx : the indexes of the governor and
+        dependant in the sentence
+        @toklist: the list of tokens of the sentence
+        @return : a float (score)
+        """
+        dep_repr = self.__make_arc_representation(gov_idx,dep_idx,toklist)
+        ylabel   =  ArcFactoredParser.RIGHTARC if gov_idx < dep_idx else ArcFactoredParser.LEFTARC
+        return self.model.dot(dep_repr,ylabel)
+
+    
+    def __make_arc_representation(self,gov_idx,dep_idx,toklist):
+        """
+        Creates a list of values from which to code a dependency arc as binary features 
+        Inserts the interactions between the words for coding the dependency in the representation.
+        
+        @param gov_idx,dep_idx : the indexes of the governor and dependant in the sentence
+        @toklist: the list of tokens of the sentence
+        @return : a list of tuples ready to be binarized and scored.
+        """
+        interaction1 = (toklist[gov_idx][1],toklist[dep_idx][1],)
+        interaction2 = (toklist[gov_idx][0],toklist[dep_idx][0],)
+        #add more interactions here to improve the parser
+
+        return toklist[gov_idx] + toklist[dep_idx] + (interaction1,) + (interaction2,)
+
+
+    def train(self,dataset,step_size=1.0,max_epochs=100):
+        """
+        @param dataset : a list of dependency trees
+        """
+        N = len(dataset)
+        for e in range(max_epochs):
+            loss = 0.0
+            for ref_tree in dataset:
+                tokens = ref_tree.tokens
+                pred_tree = self.parse_one(tokens)
+
+                if ref_tree.accurracy(pred_tree) != 1.0:
+                    loss += 1.0
+                    
+                    delta_ref = SparseWeightVector()
+                    for gov_idx,dep_idx in ref_tree.edges:
+                        x_repr = self.__make_arc_representation(gov_idx,dep_idx,tokens)
+                        ylabel = ArcFactoredParser.RIGHTARC if gov_idx < dep_idx else ArcFactoredParser.LEFTARC
+                        delta_ref += SparseWeightVector.code_phi(x_repr,ylabel)
+                    
+                    delta_pred = SparseWeightVector()
+                    for gov_idx,dep_idx in pred_tree.edges:    
+                        x_repr = self.__make_arc_representation(gov_idx,dep_idx,tokens)
+                        ylabel = ArcFactoredParser.RIGHTARC if gov_idx < dep_idx else ArcFactoredParser.LEFTARC
+                        delta_pred += SparseWeightVector.code_phi(x_repr,ylabel)
+
+                    self.model += step_size*(delta_ref-delta_pred)
+            print('Loss = ',loss, "%Exact match = ",(N-loss)/N)
+            if loss == 0.0:
+                return
+            
+    def test(self,dataset):
+        N       = len(dataset)
+        sum_acc = 0.0
+        for ref_tree in dataset:
+            tokens    = ref_tree.tokens
+            pred_tree = self.parse_one(tokens)
+            print(pred_tree)
+            print()
+            sum_acc   += ref_tree.accurracy(pred_tree)
+        return sum_acc/N
 
             
-# test = """
-# 1 le   D     2
-# 2 chat N     3
-# 3 dort V     0
-# 4 .    PONCT 3
-# """
-# test2 = """
-# 1 le      D     2
-# 2 tapis   N     3
-# 3 est     V     5
-# 4 rouge   A     3
-# 5 et      CC    0
-# 6 le      D     7
-# 7 chat    N     8
-# 8 mange   V     5
-# 9 la      D     10
-# 10 souris N     8
-# 11 .      PONCT 5
-# """
-
-# istream = io.StringIO(test)
-# istream2 =  io.StringIO(test2)
-# d = DependencyTree.read_tree(istream)
-# d2 = DependencyTree.read_tree(istream2)
-# p = ArcStandardTransitionParser()
-# p.train([d,d2],max_epochs=100,beam_size=4)
-# print(p.test([d,d2],beam_size=4))
