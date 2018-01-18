@@ -337,12 +337,14 @@ class ArcStandardTransitionParser:
             pre_action_config = []
             pred_beam = self.parse_one(tokens, beam_size, get_beam=True)
             (update, ref_prefix, pred_prefix) = self.early_prefix(ref_derivation, pred_beam)
+            x_repr_ref = ""
+            x_repr_pred = ""
             if update:
                 for action, config in ref_prefix:
-                    ref_action_config.append((action, config))
+                    x_repr_ref = self.__make_config_representation(S,B,tokens)
                 for action, config in pred_prefix:
-                    pre_action_config.append((action, config))
-            correspondance.append(((tokens, ref_derivation), (ref_action_config), (pre_action_config)))
+                    x_repr_pred = self.__make_config_representation(S,B,tokens)
+            correspondance.append(((tokens, ref_derivation), x_repr_ref, x_repr_pred))
         print(correspondance[0])
             
         exit()
