@@ -326,20 +326,27 @@ class ArcStandardTransitionParser:
         """
         @param dataset : a list of dependency trees
         """
+        ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
         N = len(dataset)
         sequences = list([(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset])
-        # print(sequences[0])
-        ref_config = []
-        pre_config = []
+        print(len(sequences))
+        # for each sequence
+        correspondance = []
         for tokens, ref_derivation in sequences:
+            ref_action_config = []
+            pre_action_config = []
             pred_beam = self.parse_one(tokens, beam_size, get_beam=True)
             (update, ref_prefix, pred_prefix) = self.early_prefix(ref_derivation, pred_beam)
             if update:
-                ref_config.append(ref_prefix[0][1])
-                pre_config.append(pred_prefix[0][1])
-        print(ref_config[0])
-        print(pre_config[0])
+                for action, config in ref_prefix:
+                    ref_action_config.append((action, config))
+                for action, config in pred_prefix:
+                    pre_action_config.append((action, config))
+            correspondance.append(((tokens, ref_derivation), (ref_action_config), (pre_action_config)))
+        print(correspondance[0])
+            
         exit()
+        ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
 
         
         for e in range(max_epochs):
