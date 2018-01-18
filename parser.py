@@ -328,7 +328,19 @@ class ArcStandardTransitionParser:
         """
         N = len(dataset)
         sequences = list([(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset])
-        print(sequences)
+        # print(sequences[0])
+        ref_config = []
+        pre_config = []
+        for tokens, ref_derivation in sequences:
+            pred_beam = self.parse_one(tokens, beam_size, get_beam=True)
+            (update, ref_prefix, pred_prefix) = self.early_prefix(ref_derivation, pred_beam)
+            if update:
+                ref_config.append(ref_prefix[0][1])
+                pre_config.append(pred_prefix[0][1])
+        print(ref_config[0])
+        print(pre_config[0])
+        exit()
+
         
         for e in range(max_epochs):
             loss = 0.0
