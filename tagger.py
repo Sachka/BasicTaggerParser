@@ -5,7 +5,7 @@ import corpus
 import numpy
 
 from keras.models import Model
-from keras.layers import Input, Dense, Embedding, LSTM, TimeDistributed
+from keras.layers import Input, Dense, Embedding, LSTM, TimeDistributed, Bidirectional
 from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
 from keras.regularizers import l1, l2, l1_l2
 from keras.preprocessing.sequence import pad_sequences
@@ -27,10 +27,10 @@ class NNTagger(object) :
 			Ycodes.append(ymat)
 		return Xcodes, Ycodes
 
-	def train(self, filename, epochs=20, batch_size=64, verbose=0, optimizer=RMSprop(lr=.001), **kwargs) :
+	def train(self, filename, epochs=5, batch_size=64, verbose=0, optimizer=RMSprop(lr=.1), **kwargs) :
 		X, Y = corpus.extract(corpus.load(filename))
-		self.x_list = list({w for x in X for w in x}) + ["__UNK__"]
-		self.y_list = list({c for y in Y for c in y}) + ["__UNK__"]
+		self.x_list = ["__START__"] + list({w for x in X for w in x}) + ["__UNK__"]
+		self.y_list = ["__START__"] + list({c for y in Y for c in y}) + ["__UNK__"]
 		self.x_codes = {x: idx for idx, x in enumerate(self.x_list)}
 		self.y_codes = {y: idx for idx, y in enumerate(self.y_list)}
 		self.reverse_x_codes = {i : x for i, x in enumerate(self.x_list)}
@@ -43,8 +43,8 @@ class NNTagger(object) :
 		self.x_size = len(self.x_codes)
 		self.y_size = len(self.y_codes)
 		ipt = Input(shape=(self.mL,))
-		e = Embedding(self.x_size, self.embedding_size, mask_zero=True)(ipt)
-		h = LSTM(self.memory_size, return_sequences=True)(e)
+		e = Embedding(self.x_size, self.embedding_size, trainable=True, mask_zero=True, name="embedding_layer")(ipt)
+		h = Bidirectional(LSTM(self.memory_size, return_sequences=True))(e)
 		o = TimeDistributed(Dense(self.y_size, bias_regularizer=l1_l2(0.), activation='softmax'))(h)
 		self.model = Model(ipt, o)
 		if verbose : self.model.summary()
@@ -56,7 +56,12 @@ class NNTagger(object) :
 	def predict(self, sentences) :
 		X = [[(self.x_codes[word] if word in self.x_codes else self.x_codes["__UNK__"]) for word in sentence] for sentence in sentences]
 		predictions = self.model.predict(pad_sequences(X, maxlen=self.mL))
-		return [list(zip(sentences[i], map(lambda a : self.reverse_y_codes[numpy.argmax(a)], predictions[i]))) for i in range(len(sentences))]
+		for i in range(len(predictions)):
+			sentence, pred = sentences[i], predictions[i,-len(sentences[i]):]
+			agg = []
+			for j in range(len(sentence)) :
+				agg.append((sentence[j], self.reverse_y_codes[numpy.argmax(pred[j])]))
+			yield agg
 
 	def test(self, filename) :
 		X_test, Y_test = corpus.extract(corpus.load(filename))
@@ -72,4 +77,4 @@ if __name__ == "__main__" :
 	tagger.train("sequoia-corpus.np_conll.train", verbose=1)
 	print(tagger.test("sequoia-corpus.np_conll.test"))
 	#print(embedding_size, memory_size, score)
-	print(tagger.predict(corpus.extract(corpus.load("sequoia-corpus.np_conll.dev"))[0]))
+	print("\n".join(map(lambda sentence : " ".join(map(str, sentence)), tagger.predict(corpus.extract(corpus.load("sequoia-corpus.np_conll.dev"))[0]) ) ) )
