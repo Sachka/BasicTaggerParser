@@ -345,9 +345,11 @@ class ArcStandardTransitionParser:
                 for action, config in ref_prefix:
                     S,B,A,score = current_config_ref
                     x_repr_ref = self.__make_config_representation(S,B,tokens)
+                    current_config_ref = config
                 for action, config in pred_prefix:
                     S,B,A,score = current_config_pred
                     x_repr_pred = self.__make_config_representation(S,B,tokens)
+                    current_config_pred = config
             correspondance.append(((tokens, ref_derivation), x_repr_ref, x_repr_pred))
         print(correspondance[10])
             
