@@ -340,12 +340,16 @@ class ArcStandardTransitionParser:
             x_repr_ref = ""
             x_repr_pred = ""
             if update:
+                current_config_ref = ref_prefix[0][1]
+                current_config_pred = pred_prefix[0][1]
                 for action, config in ref_prefix:
+                    S,B,A,score = current_config_ref
                     x_repr_ref = self.__make_config_representation(S,B,tokens)
                 for action, config in pred_prefix:
+                    S,B,A,score = current_config_pred
                     x_repr_pred = self.__make_config_representation(S,B,tokens)
             correspondance.append(((tokens, ref_derivation), x_repr_ref, x_repr_pred))
-        print(correspondance[0])
+        print(correspondance[10])
             
         exit()
         ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
