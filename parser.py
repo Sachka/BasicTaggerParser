@@ -92,6 +92,10 @@ class ArcStandardTransitionParser:
         @param y_key    : a y class name
         @return  w . Phi(x,y)
         """
+        # print(type(self.weights))
+        # print(len(self.weights))
+        # exit()
+        # print(sum([self.weights[(x_key,y_key)] for x_key in xvec_keys]))
         return sum([self.weights[(x_key,y_key)] for x_key in xvec_keys])
         
     @staticmethod
@@ -277,6 +281,7 @@ class ArcStandardTransitionParser:
         """
         S,B,A,old_score = configuration
         config_repr = self.__make_config_representation(S,B,tokens)
+        return old_score
         return old_score + self.dot(config_repr,action)
 
     def __make_config_representation(self,S,B,tokens):
@@ -326,11 +331,27 @@ class ArcStandardTransitionParser:
         """
         @param dataset : a list of dependency trees
         """
-        ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
+        x_list = ["__START__"] + list({w for x in dataset for w in x}) + ["__UNK__"]
+        x_codes = {x: idx for idx, x in enumerate(x_list)}
         N = len(dataset)
         sequences = list([(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset])
-        print(len(sequences))
-        # for each sequence
+        y_list = []
+        for tokens, ref_derivation in sequences:
+            y_list.append([x[0] for x in ref_derivation][1:])
+        y_inices_dict = {y : i for i, y in enumerate(y_list)}
+        Y = [] 
+        for sequence in y_list:
+            y_mat = np.zeros(shape=(len(sentence), len(y_indices_dict)))
+            for i, a in enumerate(sequence) :
+                y_mat[i,y_indices_dict[a]]= 1.
+                Y.append(y_mat)
+        exit()
+
+
+
+
+
+        ##### DARK SIDE #####
         correspondance = []
         for tokens, ref_derivation in sequences:
             ref_action_config = []
@@ -350,8 +371,9 @@ class ArcStandardTransitionParser:
                     S,B,A,score = current_config_pred
                     x_repr_pred = self.__make_config_representation(S,B,tokens)
                     current_config_pred = config
-            correspondance.append(((tokens, ref_derivation), x_repr_ref, x_repr_pred))
-        print(correspondance[10])
+            correspondance.append(((tokens, ref_derivation), x_repr_ref, [x[0] for x in ref_derivation][1:]))
+            # correspondance.append(((tokens, ref_derivation), x_repr_ref, x_repr_pred))
+        print(correspondance[11])
             
         exit()
         ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
