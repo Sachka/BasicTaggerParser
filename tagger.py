@@ -48,8 +48,11 @@ class NNTagger(object) :
 		if verbose : self.model.summary()
 		self.model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
 		self.model.fit(Xcodes, Ycodes, epochs=epochs, verbose=verbose, batch_size=batch_size)
-	def save(self) :
-		self.model.save("tagger.model.h5")
+		return self
+
+	def save(self, savename="tagger.model.h5") :
+		self.model.save(savename)
+		return self
 
 	def predict(self, sentences) :
 		X = [[(self.x_codes[word] if word in self.x_codes else self.x_codes["__UNK__"]) for word in sentence] for sentence in sentences]
@@ -60,7 +63,6 @@ class NNTagger(object) :
 			preds.append([self.reverse_y_codes[numpy.argmax(w)] for w in pred])
 		indices = [list(range(1, len(s) +1)) for s in sentences]
 		return indices, sentences, preds
-			
 
 	def test(self, filename) :
 		X_test, Y_test = corpus.extract(corpus.load(filename))
