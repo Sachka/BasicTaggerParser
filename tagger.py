@@ -16,9 +16,7 @@ class NNTagger(object) :
 		self.memory_size = memory_size
 
 	def _encode(self, X, Y) :
-		Xcodes = []
-		for x in X:
-			Xcodes.append([self.x_codes[elt] if elt in self.x_codes else self.x_codes["__UNK__"] for elt in x])
+		Xcodes = [[self.x_codes[elt] if elt in self.x_codes else self.x_codes["__UNK__"] for elt in x] for x in X]
 		Ycodes = []
 		for y in Y:
 			ymat = numpy.zeros((len(y),len(self.y_codes)))
@@ -56,12 +54,13 @@ class NNTagger(object) :
 	def predict(self, sentences) :
 		X = [[(self.x_codes[word] if word in self.x_codes else self.x_codes["__UNK__"]) for word in sentence] for sentence in sentences]
 		predictions = self.model.predict(pad_sequences(X, maxlen=self.mL))
+		preds = []
 		for i in range(len(predictions)):
-			sentence, pred = sentences[i], predictions[i,-len(sentences[i]):]
-			agg = []
-			for j in range(len(sentence)) :
-				agg.append((sentence[j], self.reverse_y_codes[numpy.argmax(pred[j])]))
-			yield agg
+			pred = predictions[i,-len(sentences[i]):]
+			preds.append([self.reverse_y_codes[numpy.argmax(w)] for w in pred])
+		indices = [list(range(1, len(s) +1)) for s in sentences]
+		return indices, sentences, preds
+			
 
 	def test(self, filename) :
 		X_test, Y_test = corpus.extract(corpus.load(filename))
@@ -71,10 +70,9 @@ class NNTagger(object) :
 		return self.model.evaluate(Xcodes_test, Ycodes_test, batch_size=64)
 
 if __name__ == "__main__" :
-	"""for embedding_size in range(20, 100, 10) :
-		for memory_size in range(20, 100, 10) :"""
-	tagger = NNTagger()
-	tagger.train("sequoia-corpus.np_conll.train", verbose=1)
-	print(tagger.test("sequoia-corpus.np_conll.test"))
-	#print(embedding_size, memory_size, score)
-	print("\n".join(map(lambda sentence : " ".join(map(str, sentence)), tagger.predict(corpus.extract(corpus.load("sequoia-corpus.np_conll.dev"))[0]) ) ) )
+	for embedding_size in range(20, 100, 10) :
+		for memory_size in range(20, 100, 10) :
+			tagger = NNTagger()
+			tagger.train("sequoia-corpus.np_conll.train", verbose=1)
+			print(tagger.test("sequoia-corpus.np_conll.test"))
+	#print(tagger.predict(corpus.extract(corpus.load("sequoia-corpus.np_conll.dev"))[0]))
