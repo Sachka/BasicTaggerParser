@@ -1,6 +1,6 @@
 import random
 
-COLS = {k: i for i, k in enumerate(
+_COLS = {k: i for i, k in enumerate(
     ["index", "token", "lemma", "POS", "XPOS", "features", "head", "rel", "dhead", "drel"])}
 
 
@@ -28,11 +28,11 @@ def split(filename, proportions=(("train", .8), ("dev", .1), ("test", .1)), rand
 
 
 def extract(corpus, columns=("token", "POS")):
-    return [[[w[COLS[c]] for w in s] for s in corpus] for c in columns]
+    return [[[w[_COLS[c]] for w in s] for s in corpus] for c in columns]
 
 
 def flat_extract(corpus, columns=("token", "POS")):
-    return [[w[COLS[c]] for w in s] for s in corpus for c in columns]
+    return [[w[_COLS[c]] for w in s] for s in corpus for c in columns]
 
 
 def extract_features_for_depency(filename):
