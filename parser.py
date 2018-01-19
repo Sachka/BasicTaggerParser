@@ -5,7 +5,8 @@ import numpy as np
 from collections import defaultdict
 
 from keras.models import Model, Sequential
-from keras.layers import Input, Dense, Embedding, LSTM, TimeDistributed, Bidirectional
+from keras.models import load_model
+from keras.layers import Input, Dense, Activation, Embedding, LSTM, TimeDistributed, Bidirectional, Flatten, concatenate
 from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
 from keras.regularizers import l1, l2, l1_l2
 from keras.preprocessing.sequence import pad_sequences
@@ -335,60 +336,64 @@ class ArcStandardTransitionParser:
         return sum_acc/N
 
         
-    def train(self, dataset,step_size=1.0,max_epochs=100,beam_size=4, tagger=NNTagger()):
+    def train(self, dataset,step_size=1.0,max_epochs=10,beam_size=4, tagger=NNTagger()):
         """
         @param dataset : a list of dependency trees
         """
-        x_list = ["__START__"] + list({w for x in dataset for w in x}) + ["__UNK__"]
-        x_codes = {x: idx for idx, x in enumerate(x_list)}
         N = len(dataset)
         sequences = list([(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset])
-        y_list = []
-        for tokens, ref_derivation in sequences:
-            y_list.append([x[0] for x in ref_derivation][1:])
-        y_indices_dict = {y : i for i, y in enumerate({c for Y in y_list for c in Y})}
-        Y = [] 
-        for sequence in y_list:
-            y_mat = np.zeros(shape=(len(sequence), len(y_indices_dict)))
-            for i, a in enumerate(sequence) :
-                y_mat[i,y_indices_dict[a]]= 1.
-                Y.append(y_mat)
-        intermediate_model=Model(tagger.model.inputs, tagger.model.get_layer("bidirectional_layer").output)
+
+        intermediate_model=Model(tagger.model.inputs, tagger.model.get_layer("bidirectional_1").output)
         X_S, X_B, Y = [], [], []
         def map_tokens(S, B, tokens) :
             S = [tagger.x_codes[tokens[s][0]] if tokens[s][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for s in S]
             B = [tagger.x_codes[tokens[b][0]] if tokens[b][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for b in B]
             return S,B
-
         ##### DARK SIDE #####
-        correspondance = []
         for tokens, ref_derivation in sequences:
-            ref_action_config = []
-            pre_action_config = []
             pred_beam = self.parse_one(tokens, beam_size, get_beam=True)
             (update, ref_prefix, pred_prefix) = self.early_prefix(ref_derivation, pred_beam)
             if update:
-                current_config_ref = ref_prefix[0][1]
-                current_config_pred = pred_prefix[0][1]
+                current_config = ref_prefix[0][1]
                 for action, config in ref_prefix:
-                    S,B,A,score = current_config_ref
+                    S,B,A,score = current_config
                     x_repr_ref = self.__make_config_representation(S,B,tokens)
-                    current_config_ref = config
+                    current_config = config
                     S, B = map_tokens(S, B, tokens)
                     X_S.append(S)
                     X_B.append(B)
                     Y.append(action)
         XS_encoded, XB_encoded = intermediate_model.predict(pad_sequences(X_S, maxlen=tagger.mL)), intermediate_model.predict(pad_sequences(X_B, maxlen=tagger.mL))
+        
         y_size = len(set(Y))
         y_dict = {y: i for i, y in enumerate(set(Y))}
-        Y_encoded = []
-        for y in Y :
-            y_mat = np.zeros(shape=(y_size,))
-            y_mat[y_dict[y]] = 1.
-            Y_encoded.append(y_mat)
+        Y_encoded = np.zeros(shape=(len(Y), y_size))
+        for i,y in enumerate(Y) :
+            Y_encoded[i, y_dict[y]] = 1.
         ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
-        print(XS_encoded, XB_encoded, Y_encoded)
+        # print(XS_encoded)
+
+        # exit()
+        ipt_stack = Input(shape=(122,40))
+        ipt_buffer = Input(shape=(122,40))
+        e_stack = tagger.model.get_layer("embedding_1")(ipt_stack)
+        e_buffer = tagger.model.get_layer("embedding_1")(ipt_buffer)
+        l1 = LSTM(122)
+        
+        l1 = concatenate([l1(e_stack), l1(e_buffer)], axis=-1)
+        # l2 = Flatten())
+        l3 = Dense(122)(l1)
+        o = Dense(y_size, activation="softmax")(l3)
+        nn_parser = Model([ipt_stack, ipt_buffer], o)
+        nn_parser.summary()
+        sgd = Adam(lr=.1)
+        nn_parser.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+        nn_parser.fit([XS_encoded,XB_encoded], Y_encoded, epochs=max_epochs, verbose=1)
+        # nn_parser.
         exit()
+
+
+
         for e in range(max_epochs):
             loss = 0.0
             for tokens,ref_derivation in sequences:
@@ -425,13 +430,25 @@ if __name__ == "__main__" :
     print("Direct test")
     train_conll = "sequoia-corpus.np_conll.train"
     test_conll = "sequoia-corpus.np_conll.test"
-    X = corpus.extract_features_for_depency(train_conll)
+    dev_conll = "sequoia-corpus.np_conll.dev"
+
+    nnt = NNTagger()
+    # # nnt.train("sequoia-corpus.np_conll.train", verbose=1)
+    # nnt.save()
+    nnt = NNTagger.load()
+    # nnt.model.summary()
+
+    X = corpus.extract_features_for_depency(dev_conll)
     XIO = list(map(io.StringIO, X))
     XD = list(map(DependencyTree.read_tree, XIO))
 
     Xtest = corpus.extract_features_for_depency(test_conll)
     XtestIO = list(map(io.StringIO, Xtest))
     XtestD = list(map(DependencyTree.read_tree, XtestIO))
+
+
+
+
     p = ArcStandardTransitionParser()
-    p.train(XD, max_epochs=10, tagger= NNTagger().train("sequoia-corpus.np_conll.train", verbose=1))
-    print(p.test(XtestD))
+    p.train(XD, max_epochs=10, tagger=nnt)
+    # print(p.test(XtestD))
