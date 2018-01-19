@@ -1,9 +1,17 @@
-import corpus
+
 # import tagger
 import io
 import numpy as np
 from collections import defaultdict
-from keras.models import Sequential
+
+from keras.models import Model, Sequential
+from keras.layers import Input, Dense, Embedding, LSTM, TimeDistributed, Bidirectional
+from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
+from keras.regularizers import l1, l2, l1_l2
+from keras.preprocessing.sequence import pad_sequences
+
+import corpus
+from tagger import NNTagger
 
 class DependencyTree:
 
@@ -327,7 +335,7 @@ class ArcStandardTransitionParser:
         return sum_acc/N
 
         
-    def train(self, dataset,step_size=1.0,max_epochs=100,beam_size=4):
+    def train(self, dataset,step_size=1.0,max_epochs=100,beam_size=4, tagger=NNTagger()):
         """
         @param dataset : a list of dependency trees
         """
@@ -338,18 +346,19 @@ class ArcStandardTransitionParser:
         y_list = []
         for tokens, ref_derivation in sequences:
             y_list.append([x[0] for x in ref_derivation][1:])
-        y_inices_dict = {y : i for i, y in enumerate(y_list)}
+        y_indices_dict = {y : i for i, y in enumerate({c for Y in y_list for c in Y})}
         Y = [] 
         for sequence in y_list:
-            y_mat = np.zeros(shape=(len(sentence), len(y_indices_dict)))
+            y_mat = np.zeros(shape=(len(sequence), len(y_indices_dict)))
             for i, a in enumerate(sequence) :
                 y_mat[i,y_indices_dict[a]]= 1.
                 Y.append(y_mat)
-        exit()
-
-
-
-
+        intermediate_model=Model(tagger.model.inputs, tagger.model.get_layer("bidirectional_layer").output)
+        X_S, X_B, Y = [], [], []
+        def map_tokens(S, B, tokens) :
+            S = [tagger.x_codes[tokens[s][0]] if tokens[s][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for s in S]
+            B = [tagger.x_codes[tokens[b][0]] if tokens[b][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for b in B]
+            return S,B
 
         ##### DARK SIDE #####
         correspondance = []
@@ -358,8 +367,6 @@ class ArcStandardTransitionParser:
             pre_action_config = []
             pred_beam = self.parse_one(tokens, beam_size, get_beam=True)
             (update, ref_prefix, pred_prefix) = self.early_prefix(ref_derivation, pred_beam)
-            x_repr_ref = ""
-            x_repr_pred = ""
             if update:
                 current_config_ref = ref_prefix[0][1]
                 current_config_pred = pred_prefix[0][1]
@@ -367,18 +374,21 @@ class ArcStandardTransitionParser:
                     S,B,A,score = current_config_ref
                     x_repr_ref = self.__make_config_representation(S,B,tokens)
                     current_config_ref = config
-                for action, config in pred_prefix:
-                    S,B,A,score = current_config_pred
-                    x_repr_pred = self.__make_config_representation(S,B,tokens)
-                    current_config_pred = config
-            correspondance.append(((tokens, ref_derivation), x_repr_ref, [x[0] for x in ref_derivation][1:]))
-            # correspondance.append(((tokens, ref_derivation), x_repr_ref, x_repr_pred))
-        print(correspondance[11])
-            
-        exit()
+                    S, B = map_tokens(S, B, tokens)
+                    X_S.append(S)
+                    X_B.append(B)
+                    Y.append(action)
+        XS_encoded, XB_encoded = intermediate_model.predict(pad_sequences(X_S, maxlen=tagger.mL)), intermediate_model.predict(pad_sequences(X_B, maxlen=tagger.mL))
+        y_size = len(set(Y))
+        y_dict = {y: i for i, y in enumerate(set(Y))}
+        Y_encoded = []
+        for y in Y :
+            y_mat = np.zeros(shape=(y_size,))
+            y_mat[y_dict[y]] = 1.
+            Y_encoded.append(y_mat)
         ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
-
-        
+        print(XS_encoded, XB_encoded, Y_encoded)
+        exit()
         for e in range(max_epochs):
             loss = 0.0
             for tokens,ref_derivation in sequences:
@@ -423,5 +433,5 @@ if __name__ == "__main__" :
     XtestIO = list(map(io.StringIO, Xtest))
     XtestD = list(map(DependencyTree.read_tree, XtestIO))
     p = ArcStandardTransitionParser()
-    p.train(XD, max_epochs=10)
+    p.train(XD, max_epochs=10, tagger= NNTagger().train("sequoia-corpus.np_conll.train", verbose=1))
     print(p.test(XtestD))
