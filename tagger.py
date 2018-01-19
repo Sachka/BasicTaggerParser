@@ -2,9 +2,9 @@ from __future__ import print_function
 
 import corpus
 
-import numpy
+import numpy, pickle
 
-from keras.models import Model, Sequential
+from keras.models import Model, Sequential, load_model
 from keras.layers import Input, Dense, Embedding, LSTM, TimeDistributed, Bidirectional
 from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
 from keras.regularizers import l1, l2, l1_l2
@@ -65,9 +65,20 @@ class NNTagger(object):
 
         return self
 
-    def save(self, savename="tagger.model.h5"):
-        self.model.save(savename)
+    def save(self, model_save="tagger.model.h5", pickle_save="tagger.pickle"):
+        self.model.save(model_save)
+        with open(pickle_save, "wb") as ostr :
+            pickle.dump((self.mL, self.x_codes),ostr)
         return self
+
+    @classmethod
+    def load(cls, model_save="tagger.model.h5", pickle_save="tagger.pickle"):
+        tagger = NNTagger()
+        tagger.model = load_model(model_save)
+        with open(pickle_save, "rb") as istr :
+            tagger.mL, tagger.x_codes = pickle.load(istr)
+        return tagger
+
 
     def predict(self, sentences):
         X = [[(self.x_codes[word] if word in self.x_codes else self.x_codes["__UNK__"])
@@ -89,9 +100,9 @@ class NNTagger(object):
 
 
 if __name__ == "__main__":
-    for embedding_size in range(20, 100, 10):
-        for memory_size in range(20, 100, 10):
-            tagger = NNTagger()
-            tagger.train("sequoia-corpus.np_conll.train", verbose=1)
-            print(tagger.test("sequoia-corpus.np_conll.test"))
+    #for embedding_size in range(20, 100, 10):
+    #    for memory_size in range(20, 100, 10):
+    #        print(NNTagger().train("sequoia-corpus.np_conll.train", verbose=1).test("sequoia-corpus.np_conll.test"))
     # print(tagger.predict(corpus.extract(corpus.load("sequoia-corpus.np_conll.dev"))[0]))
+    NNTagger().train("sequoia-corpus.np_conll.train", verbose=1).save()
+    tagger = NNTagger.load()
