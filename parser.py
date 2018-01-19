@@ -92,7 +92,7 @@ class ArcStandardTransitionParser:
     
     def __init__(self):
         self.weights = defaultdict(float)
-        self.model = None 
+        self.nn_parser = None 
 
     def dot(self,xvec_keys,y_key):
         """
@@ -280,7 +280,8 @@ class ArcStandardTransitionParser:
                 jdx -= 1
             early_prefix.reverse()
             return (True,ref_parse,early_prefix)
-                
+    def encode(self, seq, toks):
+        return [self.x_dict[toks[t]] if toks[t] in self.x_dict else self.x_dict["__UNK__"] for t in seq]
     def score(self,configuration,action,tokens):
         """
         Computes the prefix score of a derivation
@@ -291,7 +292,7 @@ class ArcStandardTransitionParser:
         """
         S,B,A,old_score = configuration
         config_repr = self.__make_config_representation(S,B,tokens)
-        return old_score + (self.model.predict([[encode(S)], [encode(B)]])[self.y_dict[action]] if self.model is not None else 0.)
+        return old_score + (self.nn_parser.predict([pad_sequences([self.encode(S, tokens)], maxlen=self.mL), pad_sequences([self.encode(B, tokens)], maxlen=self.mL)])[0, self.y_dict[action]] if self.nn_parser is not None else 0.)
 
     def __make_config_representation(self,S,B,tokens):
         """
@@ -336,7 +337,7 @@ class ArcStandardTransitionParser:
         return sum_acc/N
 
         
-    def train(self, dataset,step_size=1.0,max_epochs=10,beam_size=4, tagger=NNTagger()):
+    def train(self, dataset,step_size=1.0,max_epochs=3,beam_size=4, tagger=NNTagger()):
         """
         @param dataset : a list of dependency trees
         """
@@ -384,7 +385,7 @@ class ArcStandardTransitionParser:
         l_b = tagger.model.get_layer("bidirectional_1")(e_buffer)
         l1 = LSTM(122)
         
-        l1 = concatenate([l1(l_s), l1(l_b)], axis=-1)
+        l1 = concatenate([l1(l_s), l1(l_b)], axis=1)
         # l2 = Flatten())
         l3 = Dense(122)(l1)
         o = Dense(y_size, activation="softmax")(l3)
@@ -407,7 +408,7 @@ if __name__ == "__main__" :
     nnt = NNTagger.load()
     # nnt.model.summary()
 
-    X = corpus.extract_features_for_depency(dev_conll)
+    X = corpus.extract_features_for_depency(train_conll)
     XIO = list(map(io.StringIO, X))
     XD = list(map(DependencyTree.read_tree, XIO))
 
@@ -419,5 +420,5 @@ if __name__ == "__main__" :
 
 
     p = ArcStandardTransitionParser()
-    p.train(XD, max_epochs=10, tagger=nnt)
-    # print(p.test(XtestD))
+    p.train(XD, tagger=nnt)
+    print(p.test(XtestD))
