@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from keras.models import Model, Sequential
 from keras.models import load_model
-from keras.layers import Input, Dense, Activation, Embedding, LSTM, TimeDistributed, Bidirectional, Flatten, concatenate
+from keras.layers import Input, Dense, Activation, Embedding, LSTM, TimeDistributed, Bidirectional, Flatten, concatenate, Masking
 from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
 from keras.regularizers import l1, l2, l1_l2
 from keras.preprocessing.sequence import pad_sequences
@@ -363,7 +363,7 @@ class ArcStandardTransitionParser:
                     X_S.append(S)
                     X_B.append(B)
                     Y.append(action)
-        XS_encoded, XB_encoded = intermediate_model.predict(pad_sequences(X_S, maxlen=tagger.mL)), intermediate_model.predict(pad_sequences(X_B, maxlen=tagger.mL))
+        XS_encoded, XB_encoded = pad_sequences(X_S, maxlen=tagger.mL), pad_sequences(X_B, maxlen=tagger.mL)
         
         y_size = len(set(Y))
         y_dict = {y: i for i, y in enumerate(set(Y))}
@@ -374,19 +374,21 @@ class ArcStandardTransitionParser:
         # print(XS_encoded)
 
         # exit()
-        ipt_stack = Input(shape=(122,40))
-        ipt_buffer = Input(shape=(122,40))
+        ipt_stack = Input(shape=(tagger.mL,))
+        ipt_buffer = Input(shape=(tagger.mL,))
         e_stack = tagger.model.get_layer("embedding_1")(ipt_stack)
         e_buffer = tagger.model.get_layer("embedding_1")(ipt_buffer)
+        l_s = tagger.model.get_layer("bidirectional_1")(e_stack)
+        l_b = tagger.model.get_layer("bidirectional_1")(e_buffer)
         l1 = LSTM(122)
         
-        l1 = concatenate([l1(e_stack), l1(e_buffer)], axis=-1)
+        l1 = concatenate([l1(l_s), l1(l_b)], axis=-1)
         # l2 = Flatten())
         l3 = Dense(122)(l1)
         o = Dense(y_size, activation="softmax")(l3)
         nn_parser = Model([ipt_stack, ipt_buffer], o)
         nn_parser.summary()
-        sgd = Adam(lr=.1)
+        sgd = RMSprop(lr=.01)
         nn_parser.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
         nn_parser.fit([XS_encoded,XB_encoded], Y_encoded, epochs=max_epochs, verbose=1)
         # nn_parser.

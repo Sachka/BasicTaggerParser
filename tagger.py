@@ -97,5 +97,4 @@ if __name__ == "__main__":
     #    for memory_size in range(20, 100, 10):
     #        print(NNTagger().train("sequoia-corpus.np_conll.train", verbose=1).test("sequoia-corpus.np_conll.test"))
     # print(tagger.predict(corpus.extract(corpus.load("sequoia-corpus.np_conll.dev"))[0]))
-    NNTagger().train("sequoia-corpus.np_conll.train", verbose=1).save()
-    tagger = NNTagger.load()
+    NNTagger().train("sequoia-corpus.np_conll.train", verbose=1)

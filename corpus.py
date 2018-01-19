@@ -13,7 +13,6 @@ def load(filename, randomize=False):
         random.shuffle(text)
     return text
 
-
 def split(filename, proportions=(("train", .8), ("dev", .1), ("test", .1)), randomize=False):
     text = load(filename, randomize=randomize)
     size = len(text)
@@ -26,14 +25,8 @@ def split(filename, proportions=(("train", .8), ("dev", .1), ("test", .1)), rand
         start = end
     return tuple([filename + "." + p[0] for p in proportions])
 
-
 def extract(corpus, columns=("token", "POS")):
     return [[[w[_COLS[c]] for w in s] for s in corpus] for c in columns]
-
-
-def flat_extract(corpus, columns=("token", "POS")):
-    return [[w[_COLS[c]] for w in s] for s in corpus for c in columns]
-
 
 def extract_features_for_depency(filename):
     index, token, POS, head = extract(
