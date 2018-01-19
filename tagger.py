@@ -15,7 +15,6 @@ class NNTagger(object):
     def __init__(self, embedding_size=50, memory_size=20):
         self.embedding_size = embedding_size
         self.memory_size = memory_size
-        self.embedding_output = None
 
     def _encode(self, X, Y):
         Xcodes = [[self.x_codes[elt] if elt in self.x_codes else self.x_codes["__UNK__"]
@@ -46,8 +45,7 @@ class NNTagger(object):
         self.x_size = len(self.x_codes)
         self.y_size = len(self.y_codes)
         ipt = Input(shape=(self.mL,))
-        e = Embedding(self.x_size, self.embedding_size, trainable=True,
-                      mask_zero=True, name="embedding_layer")(ipt)
+        e = Embedding(self.x_size, self.embedding_size, mask_zero=True)(ipt)
         h = Bidirectional(LSTM(self.memory_size, return_sequences=True))(e)
         o = TimeDistributed(
             Dense(self.y_size, bias_regularizer=l1_l2(0.), activation='softmax'))(h)
@@ -58,11 +56,6 @@ class NNTagger(object):
             optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
         self.model.fit(Xcodes, Ycodes, epochs=epochs,
                        verbose=verbose, batch_size=batch_size)
-        layer_name = 'embedding_layer'
-        intermediate_layer_model = Model(inputs=self.model.input,
-                                         outputs=self.model.get_layer(layer_name).output)
-        self.embedding_output = intermediate_layer_model.predict(Xcodes)
-
         return self
 
     def save(self, model_save="tagger.model.h5", pickle_save="tagger.pickle"):
