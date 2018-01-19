@@ -91,7 +91,8 @@ class ArcStandardTransitionParser:
     TERMINATE= "T"
     
     def __init__(self):
-        self.weights = defaultdict(float) 
+        self.weights = defaultdict(float)
+        self.model = None 
 
     def dot(self,xvec_keys,y_key):
         """
@@ -290,8 +291,7 @@ class ArcStandardTransitionParser:
         """
         S,B,A,old_score = configuration
         config_repr = self.__make_config_representation(S,B,tokens)
-        return old_score
-        return old_score + self.dot(config_repr,action)
+        return old_score + (self.model.predict([[encode(S)], [encode(B)]])[self.y_dict[action]] if self.model is not None else 0.)
 
     def __make_config_representation(self,S,B,tokens):
         """
@@ -363,13 +363,15 @@ class ArcStandardTransitionParser:
                     X_S.append(S)
                     X_B.append(B)
                     Y.append(action)
+
         XS_encoded, XB_encoded = pad_sequences(X_S, maxlen=tagger.mL), pad_sequences(X_B, maxlen=tagger.mL)
-        
+        self.x_dict = tagger.x_codes
+        self.mL = tagger.mL
         y_size = len(set(Y))
-        y_dict = {y: i for i, y in enumerate(set(Y))}
+        self.y_dict = {y: i for i, y in enumerate(set(Y))}
         Y_encoded = np.zeros(shape=(len(Y), y_size))
         for i,y in enumerate(Y) :
-            Y_encoded[i, y_dict[y]] = 1.
+            Y_encoded[i, self.y_dict[y]] = 1.
         ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
         # print(XS_encoded)
 
@@ -386,48 +388,13 @@ class ArcStandardTransitionParser:
         # l2 = Flatten())
         l3 = Dense(122)(l1)
         o = Dense(y_size, activation="softmax")(l3)
-        nn_parser = Model([ipt_stack, ipt_buffer], o)
-        nn_parser.summary()
-        sgd = RMSprop(lr=.01)
-        nn_parser.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
-        nn_parser.fit([XS_encoded,XB_encoded], Y_encoded, epochs=max_epochs, verbose=1)
-        # nn_parser.
-        exit()
+        self.nn_parser = Model([ipt_stack, ipt_buffer], o)
+        self.nn_parser.summary()
+        sgd = RMSprop(lr=.001)
+        self.nn_parser.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+        self.nn_parser.fit([XS_encoded,XB_encoded], Y_encoded, epochs=max_epochs, verbose=1)
+        return self
 
-
-
-        for e in range(max_epochs):
-            loss = 0.0
-            for tokens,ref_derivation in sequences:
-                pred_beam = self.parse_one(tokens,beam_size,get_beam=True)
-                (update, ref_prefix,pred_prefix) = self.early_prefix(ref_derivation,pred_beam)
-                #print('R',ref_derivation)
-                #print('P',pred_prefix)
-                #self.test(dataset,beam_size)
-
-                if update:
-                    #print (pred_prefix)
-                    loss += 1.0
-                    delta_ref = SparseWeightVector()
-                    current_config = ref_prefix[0][1]
-                    for action,config in ref_prefix:
-                        S,B,A,score = current_config
-                        x_repr = self.__make_config_representation(S,B,tokens)
-                        delta_ref += SparseWeightVector.code_phi(x_repr,action)
-                        current_config = config
-                        
-                    delta_pred = SparseWeightVector()
-                    current_config = pred_prefix[0][1]
-                    for action,config in pred_prefix:
-                        S,B,A,score = current_config
-                        x_repr = self.__make_config_representation(S,B,tokens)
-                        delta_pred += SparseWeightVector.code_phi(x_repr,action)
-                        current_config = config
-
-                    self.model += step_size*(delta_ref-delta_pred)
-            print('Loss = ',loss, "%Exact match = ",(N-loss)/N)
-            if loss == 0.0:
-                return
 if __name__ == "__main__" :
     print("Direct test")
     train_conll = "sequoia-corpus.np_conll.train"
