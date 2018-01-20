@@ -241,29 +241,84 @@ class DependencyParser:
         return sum_acc/N
 
         
-    def train(self, dataset, tagger, epochs=10):
+    def train(self, dataset, tagger, epochs=100):
         """
         @param dataset : a list of dependency trees
         """
         N = len(dataset)
-        sequences = [(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset]
+        """X, T, Y = zip(*[([t[1] for t in dtree.tokens], [tagger.x_codes[t[0]] if t[0] in tagger.x_codes else tagger.x_codes["__UNK__"] for t in dtree.tokens], dtree.edges) for dtree in dataset])
+        T = pad_sequences(T, maxlen=tagger.mL)
+        xlist = ["__UNK__"] +list({x for xseq in X for x in xseq})
+        self.x_dict = {x:i for i, x in enumerate(xlist)}
+        X = [[self.x_dict[x] for x in xseq] for xseq in X]
+        X = pad_sequences(X, maxlen=tagger.mL)
+        X_encoded = np.zeros((len(X), tagger.mL, len(xlist)))
+        for i, xseq in enumerate(X) :
+            for j, x in enumerate(xseq) :
+               if x : X_encoded[i, j, x] = 1. 
+        X = X_encoded
+        ylist = ["__UNK__"] + list({y for yseq in Y for y in yseq})
+        self.y_dict={y: i for i, y, in enumerate(ylist)}
+        self.reverse_y_dict=dict(enumerate(ylist))
+        self.mYL  = max(map(len, Y))
+        Y = [[self.y_dict[y] for y in yseq] for yseq in Y]
+        Y = pad_sequences(Y, maxlen=self.mYL)
+        ipt_pos = Input(shape=(tagger.mL,len(xlist)))
+        l = LSTM(50, return_sequences=True)(ipt_pos)
+        ipt_tok = Input(shape=(tagger.mL,))
+        e = tagger.model.get_layer("embedding_1")(ipt_tok)
+        b = tagger.model.get_layer("bidirectional_1")(e)
+        l2 = LSTM(122, name="lstm_second")
+        c =  concatenate([l2(e), l2(l)], axis=1)
+        o = Dense(self.mYL, activation="softmax")(c)
+        self.model = Model([ipt_pos, ipt_tok], o)
+        self.model.summary()
+        sgd = RMSprop(lr=.01)
+        self.model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+        self.model.fit([X,T], Y, epochs=epochs, verbose=1)
+        exit()"""
+        sequences = list([(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset])
 
-        X_S, X_B, Y = [], [], []
+        toks, _ = zip(*sequences)
+        plist = ["__UNK__"] + list({t[1] for tseq in toks for  t in tseq})
+        self.p_dict ={p:i for i,p in enumerate(plist)}
+        self.mPL = len(plist)  
+
+        X_S, X_SP, X_B, X_BP, Y = [], [], [], [], []
         def map_tokens(S, B, tokens) :
             S = [tagger.x_codes[tokens[s][0]] if tokens[s][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for s in S]
             B = [tagger.x_codes[tokens[b][0]] if tokens[b][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for b in B]
             return S,B
+        def map_pos(S, B, tokens) :
+            S = [self.p_dict[tokens[s][1]] if tokens[s][1] in self.p_dict else self.p_dict["__UNK__"] for s in S]
+            B = [self.p_dict[tokens[b][1]] if tokens[b][1] in self.p_dict else self.p_dict["__UNK__"] for b in B]
+
+            return S,B
         ##### DARK SIDE #####
         for tokens, ref_derivation in sequences:
+
+
             current_config = ref_derivation[0][1]
             for action, config in ref_derivation[1:]: #do not learn the "None" dummy action
                 S,B,_,_ = current_config
                 current_config = config
-                S,B = map_tokens(S, B, tokens)
-                X_S.append(S)
-                X_B.append(B)
+                ST,BT = map_tokens(S, B, tokens)
+                SP, BP = map_pos(S, B, tokens)
+                X_S.append(ST)
+                X_SP.append(SP)
+                X_B.append(BT)
+                X_BP.append(BP)
                 Y.append(action)
-        XS_encoded, XB_encoded = pad_sequences(X_S, maxlen=tagger.mL), pad_sequences(X_B, maxlen=tagger.mL)
+        XS_encoded, XSP_encoded, XB_encoded, XBP_encoded = pad_sequences(X_S, maxlen=tagger.mL), pad_sequences(X_SP, maxlen=tagger.mL), pad_sequences(X_B, maxlen=tagger.mL), pad_sequences(X_BP, maxlen=tagger.mL)
+        XSP, XBP = np.zeros((len(XSP_encoded),tagger.mL,self.mPL)), np.zeros((len(XBP_encoded),tagger.mL,self.mPL)) #one hot
+        for i, xsp in enumerate(XSP_encoded) :
+            for j, x in enumerate(xsp) :
+                if x : XSP[i, j, x] = 1.
+        for i, xbp in enumerate(XBP_encoded) :
+            for j, x in enumerate(xbp) :
+                if x : XBP[i, j, x] = 1.
+        XSP_encoded, XBP_encoded = XSP, XBP
+
         self.x_dict = tagger.x_codes
         self.mL = tagger.mL
         y_size = len(set(Y))
@@ -279,16 +334,23 @@ class DependencyParser:
         # exit()
         ipt_stack = Input(shape=(tagger.mL,))
         ipt_buffer = Input(shape=(tagger.mL,))
+        ipt_stackpos = Input(shape=(tagger.mL, self.mPL))
+        ipt_bufferpos = Input(shape=(tagger.mL, self.mPL))
         e_stack = tagger.model.get_layer("embedding_1")(ipt_stack)
         e_buffer = tagger.model.get_layer("embedding_1")(ipt_buffer)
         l_s = tagger.model.get_layer("bidirectional_1")(e_stack)
         l_b = tagger.model.get_layer("bidirectional_1")(e_buffer)
-        l1 = LSTM(122)
-        
-        l1 = concatenate([l1(l_s), l1(l_b)], axis=1)
+        l1 = LSTM(122, return_sequences=True)
+        l2 = LSTM(122, return_sequences=True)
+        l_sp = LSTM(40, return_sequences=True)(ipt_stackpos)
+        l_bp = LSTM(40, return_sequences=True)(ipt_bufferpos)
+        l1t = concatenate([l1(l_s), l1(l_b)], axis=1)
+        l1p = concatenate([l2(l_sp), l2(l_bp)], axis=1)
         # l2 = Flatten())
-        l3 = Dense(122)(l1)
-        o = Dense(y_size, activation="softmax")(l3)
+        l3 = LSTM(122, return_sequences=True)
+        c = concatenate([l3(l1t), l3(l1p)], axis=1)
+        l4 = Dense(122)(c)
+        o = Dense(y_size, activation="softmax")(l4)
         self.nn_parser = Model([ipt_stack, ipt_buffer], o)
         self.nn_parser.summary()
         sgd = RMSprop(lr=.01)
