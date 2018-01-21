@@ -8,6 +8,11 @@ __pycache__/
 # C extensions
 *.so
 
+# project structure
+tagger.model.h5
+tagger.pickle
+vectors50
+
 # Distribution / packaging
 .Python
 env/
