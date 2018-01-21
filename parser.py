@@ -2,7 +2,7 @@
 # import tagger
 import io
 import numpy as np
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 from keras.models import Model, Sequential
 from keras.models import load_model
@@ -144,7 +144,7 @@ class DependencyParser:
         """
         S,B,A,score = configuration
         w0 = B[0]
-        return (S + (w0,), B[1:], A, self.score(configuration,DependencyParser.SHIFT,tokens)) 
+        return (S + (w0,), B[1:], A, score + self.score(configuration,DependencyParser.SHIFT,tokens)) 
 
     def leftarc(self,configuration,tokens):
         """
@@ -152,16 +152,16 @@ class DependencyParser:
         """
         S,B,A,score = configuration
         i,j = S[-2],S[-1]
-        return (S[:-2]+(j,), B, A + ((j,i),), self.score(configuration,DependencyParser.LEFTARC,tokens)) 
+        return (S[:-2]+(j,), B, A + ((j,i),), score + self.score(configuration,DependencyParser.LEFTARC,tokens)) 
 
     def rightarc(self,configuration,tokens):
         S,B,A,score = configuration
         i,j = S[-2],S[-1]
-        return (S[:-1], B, A + ((i,j),), self.score(configuration,DependencyParser.RIGHTARC,tokens)) 
+        return (S[:-1], B, A + ((i,j),), score + self.score(configuration,DependencyParser.RIGHTARC,tokens)) 
 
     def terminate(self,configuration,tokens):
         S,B,A,score = configuration
-        return (S, B, A, self.score(configuration,DependencyParser.TERMINATE,tokens))        
+        return (S, B, A, score + self.score(configuration,DependencyParser.TERMINATE,tokens))        
 
 
     def parse_one(self,sentence,beam_size=4,get_beam=False):
@@ -240,8 +240,33 @@ class DependencyParser:
             sum_acc   += ref_tree.accurracy(pred_tree)
         return sum_acc/N
 
+    def prep(self, dataset) :
+        """
+        turn sequences to X, Y for learning
+        """
+        sequences = [(dtree.tokens, self.oracle_derivation(dtree)) for dtree in dataset]
+        X_S, X_B, Y = [], [], []
+        def map_tokens(S, B, tokens) :
+            S = [self.x_dict[tokens[s][0]] if tokens[s][0] in self.x_dict else self.x_dict["__UNK__"] for s in S]
+            B = [self.x_dict[tokens[b][0]] if tokens[b][0] in self.x_dict else self.x_dict["__UNK__"] for b in B]
+            return S,B
+        ##### DARK SIDE #####
+        for tokens, ref_derivation in sequences:
+            current_config = ref_derivation[0][1]
+            for action, config in ref_derivation[1:]: #do not learn the "None" dummy action
+                S,B,_,_ = current_config
+                current_config = config
+                S,B = map_tokens(S, B, tokens)
+                X_S.append(S)
+                X_B.append(B)
+                Y.append(action)
+        XS_encoded, XB_encoded = pad_sequences(X_S, maxlen=self.mL), pad_sequences(X_B, maxlen=self.mL)
+        Y_encoded = np.zeros(shape=(len(Y), self.y_size))
+        for i,y in enumerate(Y) :
+            Y_encoded[i, self.y_dict[y]] = 1.
+        return XS_encoded, XB_encoded, Y_encoded
         
-    def train(self, dataset, tagger, epochs=10):
+    def train(self, dataset, testset, tagger, epochs=3):
         """
         @param dataset : a list of dependency trees
         """
@@ -266,15 +291,16 @@ class DependencyParser:
         XS_encoded, XB_encoded = pad_sequences(X_S, maxlen=tagger.mL), pad_sequences(X_B, maxlen=tagger.mL)
         self.x_dict = tagger.x_codes
         self.mL = tagger.mL
-        y_size = len(set(Y))
-        y_list=list(set(Y))
-        self.y_dict = {y: i for i, y in enumerate(y_list)}
-        self.reverse_y_dict=dict(enumerate(y_list))
-        Y_encoded = np.zeros(shape=(len(Y), y_size))
+        self.y_size = len(set(Y))
+        self.y_list=list(set(Y))
+        self.y_dict = {y: i for i, y in enumerate(self.y_list)}
+        self.reverse_y_dict=dict(enumerate(self.y_list))
+        Y_encoded = np.zeros(shape=(len(Y), self.y_size))
         for i,y in enumerate(Y) :
             Y_encoded[i, self.y_dict[y]] = 1.
         ###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
         # print(XS_encoded)
+        tXS, tXB, tY = self.prep(testset)
 
         # exit()
         ipt_stack = Input(shape=(tagger.mL,))
@@ -288,12 +314,13 @@ class DependencyParser:
         l1 = concatenate([l1(l_s), l1(l_b)], axis=1)
         # l2 = Flatten())
         l3 = Dense(122)(l1)
-        o = Dense(y_size, activation="softmax")(l3)
+        o = Dense(self.y_size, activation="softmax")(l3)
         self.nn_parser = Model([ipt_stack, ipt_buffer], o)
         self.nn_parser.summary()
         sgd = RMSprop(lr=.01)
         self.nn_parser.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
-        self.nn_parser.fit([XS_encoded,XB_encoded], Y_encoded, epochs=epochs, verbose=1)
+        self.nn_parser.fit([XS_encoded,XB_encoded], Y_encoded, epochs=epochs, verbose=1, validation_split=.2)
+        print(self.nn_parser.evaluate([tXS, tXB], tY, batch_size=64))
         return self
 
 if __name__ == "__main__" :
@@ -308,7 +335,7 @@ if __name__ == "__main__" :
     nnt = NNTagger.load()
     # nnt.model.summary()
 
-    X = corpus.extract_features_for_depency(train_conll)
+    X = corpus.extract_features_for_depency(dev_conll)
     XIO = list(map(io.StringIO, X))
     XD = list(map(DependencyTree.read_tree, XIO))
 
@@ -320,5 +347,6 @@ if __name__ == "__main__" :
 
 
     p = DependencyParser()
-    p.train(XD, nnt)
+    p.train(XD, XtestD, nnt)
+    
     print(p.test(XtestD[:10]))
