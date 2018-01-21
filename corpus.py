@@ -5,7 +5,7 @@ _COLS = {k: i for i, k in enumerate(
     ["index", "token", "lemma", "POS", "XPOS", "features", "head", "rel", "dhead", "drel"])}
 
 
-def load(filename, randomize=False):
+def load(filename, randomize=True):
     text = []
     with open(filename, "r") as i:
         text = [[t.split("\t") for t in s.split("\n")]
@@ -65,7 +65,36 @@ def read_embeddings(filename, verbose=0):
     return embedding_index
 
 
+def phrase2conll(phrase):
+    clist = []
+    conll = ""
+    phrase = phrase.split(" ")
+    for idx, word in enumerate(phrase):
+        conll = str(idx) + "\t" + word + "\t" + "_" + "\t" + \
+            "A" + "\t" + "_" + "\t" + "_" + "\t" + "_" + "\t" + "_" + "\t" + "_"
+        clist.append(conll.split("\t"))
+    return clist
+
+
+def phrase2extraction(phrase):
+    return extract([phrase2conll(phrase)])
+
+
+def phrase2pos(prediction):
+    conll = ""
+    for idx in range(len(prediction[0][0])):
+        conll += str(prediction[0][0][idx]) + "\t" + prediction[1][0][idx] + "\t" + "_" + "\t" + \
+            prediction[2][0][idx] + "\t" + "_" + "\t" + \
+            "_" + "\t" + "_" + "\t" + "_" + "\t" + "_" + "\n"
+    return conll.strip()
+
+
 if __name__ == "__main__":
-    corpus = load(split("sequoia-corpus.np_conll", randomize=True)[0])
+    # corpus = load(split("sequoia-corpus.np_conll", randomize=True)[0])
+    demo = "hello world"
+    print(phrase2conll(demo))
+    print(phrase2extraction(demo))
+    # print(corpus)
+    # print(corpus[0][0])
     # extract(corpus)[1][0][0]
     # flat_extract(corpus)[1][0]
