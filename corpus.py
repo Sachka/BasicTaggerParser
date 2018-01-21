@@ -1,4 +1,5 @@
 import random
+import numpy as np
 
 _COLS = {k: i for i, k in enumerate(
     ["index", "token", "lemma", "POS", "XPOS", "features", "head", "rel", "dhead", "drel"])}
@@ -13,6 +14,7 @@ def load(filename, randomize=False):
         random.shuffle(text)
     return text
 
+
 def split(filename, proportions=(("train", .8), ("dev", .1), ("test", .1)), randomize=False):
     text = load(filename, randomize=randomize)
     size = len(text)
@@ -25,8 +27,10 @@ def split(filename, proportions=(("train", .8), ("dev", .1), ("test", .1)), rand
         start = end
     return tuple([filename + "." + p[0] for p in proportions])
 
+
 def extract(corpus, columns=("token", "POS")):
     return [[[w[_COLS[c]] for w in s] for s in corpus] for c in columns]
+
 
 def extract_features_for_depency(filename):
     index, token, POS, head = extract(
@@ -45,7 +49,23 @@ def extract_features_for_depency(filename):
     return sentence_list
 
 
+def read_embeddings(filename, verbose=0):
+    """
+    read embeddings
+    """
+    embedding_index = {}
+    embedding_file = open(filename, 'r')
+    # header = list(map(int, embedding_file.readline().strip().split(' ')))
+    for line in embedding_file:
+        values = line.split()
+        word = values[0]
+        coefs = np.asarray(values[1:], dtype='float32')
+        embedding_index[word] = coefs
+    embedding_file.close()
+    return embedding_index
+
+
 if __name__ == "__main__":
     corpus = load(split("sequoia-corpus.np_conll", randomize=True)[0])
-    extract(corpus)[1][0][0]
-    flat_extract(corpus)[1][0]
+    # extract(corpus)[1][0][0]
+    # flat_extract(corpus)[1][0]
