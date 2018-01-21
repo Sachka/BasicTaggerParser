@@ -209,7 +209,14 @@ class DependencyParser:
             return DependencyTree(tokens=sentence,edges=succ[2])
 
     def encode(self, seq, toks):
-        return pad_sequences([[self.x_dict[toks[t]] if toks[t] in self.x_dict else self.x_dict["__UNK__"] for t in seq]], maxlen=self.mL)
+        return pad_sequences([[self.x_dict[toks[t][0]] if toks[t][0] in self.x_dict else self.x_dict["__UNK__"] for t in seq]], maxlen=self.mL)
+
+    def encodepos(self, seq, toks) :
+        ecd = pad_sequences([[self.p_dict[toks[t][1]] if toks[t][1] in self.p_dict else self.p_dict["__UNK__"] for t in seq]], maxlen=self.mL)
+        re_ecd = np.zeros((1, self.mL, self.mPL))
+        for i, t in enumerate(ecd[0]) :
+            re_ecd[0, i, t] = 1
+        return re_ecd
 
     def score(self,configuration,action,tokens):
         """
@@ -223,23 +230,27 @@ class DependencyParser:
         """if self.nn_parser is not None :
            print(self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)]))
            print(self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)])[0, self.y_dict[action]])"""
-        return old_score + (self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)])[0, self.y_dict[action]] if self.nn_parser is not None else 0.)
+        return old_score + (self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens), self.encodepos(S, tokens), self.encodepos(B, tokens)])[0, self.y_dict[action]] if self.nn_parser is not None else 0.)
     
     def test(self,dataset,beam_size=4):
         """
         @param dataset: a list of DependencyTrees
         @param beam_size: size of the beam
         """
+        dataset = [(dtree.tokens, dtree) for dtree in dataset]
         N       = len(dataset)
         sum_acc = 0.0
-        for ref_tree in dataset:
-            tokens    = ref_tree.tokens
+        for tokens, ref_tree in dataset:
             pred_tree = self.parse_one(tokens,beam_size)
             print(pred_tree)
             print()
             sum_acc   += ref_tree.accurracy(pred_tree)
         return sum_acc/N
 
+    def map_pos(self, S, B, tokens) :
+        S = [self.p_dict[tokens[s][1]] if tokens[s][1] in self.p_dict else self.p_dict["__UNK__"] for s in S]
+        B = [self.p_dict[tokens[b][1]] if tokens[b][1] in self.p_dict else self.p_dict["__UNK__"] for b in B]
+        return S,B
         
     def train(self, dataset, tagger, epochs=100):
         """
@@ -289,11 +300,6 @@ class DependencyParser:
             S = [tagger.x_codes[tokens[s][0]] if tokens[s][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for s in S]
             B = [tagger.x_codes[tokens[b][0]] if tokens[b][0] in tagger.x_codes else tagger.x_codes["__UNK__"] for b in B]
             return S,B
-        def map_pos(S, B, tokens) :
-            S = [self.p_dict[tokens[s][1]] if tokens[s][1] in self.p_dict else self.p_dict["__UNK__"] for s in S]
-            B = [self.p_dict[tokens[b][1]] if tokens[b][1] in self.p_dict else self.p_dict["__UNK__"] for b in B]
-
-            return S,B
         ##### DARK SIDE #####
         for tokens, ref_derivation in sequences:
 
@@ -303,7 +309,7 @@ class DependencyParser:
                 S,B,_,_ = current_config
                 current_config = config
                 ST,BT = map_tokens(S, B, tokens)
-                SP, BP = map_pos(S, B, tokens)
+                SP, BP = self.map_pos(S, B, tokens)
                 X_S.append(ST)
                 X_SP.append(SP)
                 X_B.append(BT)
@@ -332,7 +338,7 @@ class DependencyParser:
         # print(XS_encoded)
 
         # exit()
-        ipt_stack = Input(shape=(tagger.mL,), name="stack_e")
+        """ipt_stack = Input(shape=(tagger.mL,), name="stack_e")
         ipt_buffer = Input(shape=(tagger.mL,), name="buffer_e")
         ipt_stackpos = Input(shape=(tagger.mL, self.mPL), name="stack_p")
         ipt_bufferpos = Input(shape=(tagger.mL, self.mPL), name="buffer_p")
@@ -355,7 +361,9 @@ class DependencyParser:
         self.nn_parser.summary()
         sgd = RMSprop(lr=.01)
         self.nn_parser.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
-        self.nn_parser.fit([XS_encoded,XB_encoded, XSP_encoded, XBP_encoded], Y_encoded, epochs=1, verbose=1, validation_split=.2)
+        self.nn_parser.fit([XS_encoded,XB_encoded, XSP_encoded, XBP_encoded], Y_encoded, epochs=3, verbose=1, validation_split=.2)
+        self.nn_parser.save("fatparser.model.h5")"""
+        self.nn_parser = load_model("fatparser.model.h5")
         return self
 
 if __name__ == "__main__" :
@@ -370,7 +378,7 @@ if __name__ == "__main__" :
     nnt = NNTagger.load()
     # nnt.model.summary()
 
-    X = corpus.extract_features_for_depency(train_conll)
+    X = corpus.extract_features_for_depency(dev_conll)
     XIO = list(map(io.StringIO, X))
     XD = list(map(DependencyTree.read_tree, XIO))
 

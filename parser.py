@@ -304,6 +304,7 @@ class DependencyParser:
 
         # exit()
         ipt_stack = Input(shape=(tagger.mL,))
+	ipt_stack_pos = Input(shape=(self.yML,))
         ipt_buffer = Input(shape=(tagger.mL,))
         e_stack = tagger.model.get_layer("embedding_1")(ipt_stack)
         e_buffer = tagger.model.get_layer("embedding_1")(ipt_buffer)
