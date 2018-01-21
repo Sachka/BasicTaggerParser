@@ -78,7 +78,7 @@ class NNTagger(object):
         self.model.compile(
             optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
         self.model.fit(Xcodes, Ycodes, epochs=epochs,
-                       verbose=verbose, batch_size=batch_size, shuffle=False, validation_data=(D_Xcodes, D_Ycodes), callbacks=[earlystop])
+                       verbose=verbose, batch_size=batch_size, shuffle=True, validation_data=(D_Xcodes, D_Ycodes), callbacks=[earlystop])
         return self
 
     def save(self, model_save="tagger.model.h5", pickle_save="tagger.pickle"):
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     print("TAGGER WITHOUT EXTERNAL EMBEDDINGS")
     print(tagger_no_WE.test("sequoia-corpus.np_conll.test"))
     while True:
-        print(">", end=' ')
+        # print(">", end=' ')
         phrase = input()
         if phrase == "BREAK":
             break
