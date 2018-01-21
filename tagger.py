@@ -142,7 +142,7 @@ if __name__ == "__main__":
     print("TAGGER WITHOUT EXTERNAL EMBEDDINGS")
     print(tagger_no_WE.test("sequoia-corpus.np_conll.test"))
     while True:
-        # print(">", end=' ')
+        print(">", end=' ')
         phrase = input()
         if phrase == "BREAK":
             break
