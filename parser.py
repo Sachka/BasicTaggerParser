@@ -223,7 +223,7 @@ class DependencyParser:
         """if self.nn_parser is not None :
            print(self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)]))
            print(self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)])[0, self.y_dict[action]])"""
-        return old_score + (self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)])[0, self.y_dict[action]] if self.nn_parser is not None else 0.)
+        return (self.nn_parser.predict([self.encode(S, tokens), self.encode(B, tokens)])[0, self.y_dict[action]] if self.nn_parser is not None else 0.)
     
     def test(self,dataset,beam_size=4):
         """
@@ -304,16 +304,17 @@ class DependencyParser:
 
         # exit()
         ipt_stack = Input(shape=(tagger.mL,))
+	ipt_stack_pos = Input(shape=(self.yML,))
         ipt_buffer = Input(shape=(tagger.mL,))
         e_stack = tagger.model.get_layer("embedding_1")(ipt_stack)
         e_buffer = tagger.model.get_layer("embedding_1")(ipt_buffer)
         l_s = tagger.model.get_layer("bidirectional_1")(e_stack)
         l_b = tagger.model.get_layer("bidirectional_1")(e_buffer)
-        l1 = LSTM(122)
+        l1 = LSTM(122, return_sequences=True)
         
         l1 = concatenate([l1(l_s), l1(l_b)], axis=1)
         # l2 = Flatten())
-        l3 = Dense(122)(l1)
+        l3 = LSTM(122)(l1)
         o = Dense(self.y_size, activation="softmax")(l3)
         self.nn_parser = Model([ipt_stack, ipt_buffer], o)
         self.nn_parser.summary()

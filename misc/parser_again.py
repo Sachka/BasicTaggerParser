@@ -3,7 +3,7 @@ import io
 import numpy as np
 from collections import defaultdict, namedtuple
 
-from keras.models import Model, Sequential
+from keras.models import Model, Sequential, load_model
 from keras.models import load_model
 from keras.layers import Input, Dense, Activation, Embedding, LSTM, TimeDistributed, Bidirectional, Flatten, concatenate, Masking
 from keras.optimizers import SGD, Adam, RMSprop, Adadelta, Adagrad, Adamax, Nadam
@@ -68,32 +68,48 @@ class DependencyParser :
 			derivation.append((action, config))
 			config = DependencyParser.ACTIONS[action](config)
 			action = step(config, arcs, indices)
-		print(config)
 		return derivation, config
 
-	def beam_parse(self, sentence, beam_size):
+	def beam_parse(self, sentence, beam_size=4):
 		N =  len(sentence)
 		configs = [initial_config(N)]
-		prev_scores = {config[0] : 0.}
+		end_configs = []
+		prev_scores = {configs[0] : 0.}
 		for i in range(2*N - 1) :
 			for config in sorted(configs, key=lambda c: prev_scores[c], reverse=True)[:beam_size] :
-				for action in self.possible_actions(c) :
+				for action in self.possible_actions(config) :
 					new_config = DependencyParser.ACTIONS[action](config)
-					prev_score[new_config] = self.score(new_config, sentence, action) + prev_scores[config]
+					prev_scores[new_config] = self.score(new_config, sentence, action) + prev_scores[config]
 					configs.append(new_config)
-		return max(config, key=lambda c: prev_scores[c])
+				if config.stack == ((0,),) and not len(config.stack) :
+					end_configs.append(config)
+		print(max(configs, key=lambda c: prev_scores[c]))
+		return max(configs, key=lambda c: prev_scores[c])
 
-	def _encode(self, sequence) :
-		return pad_sequences([[self.x_codes[t] for t in sequence]])
+	def _encode(self, sequence, tokens) :
+		return pad_sequences([[self.x_codes[tokens[t]] if tokens[t] in self.x_codes else self.x_codes["__UNK__"] for t in sequence]], maxlen=self.mL)
 
 	def _index_for(self, action) :
 		return self.y_codes[action]
 
 	def score(self, config, sentence, action) :
-		return self.model.predict([self._encode(config.stack), self._encode(config.buffer)])[0,self._index_for(action)]
+		return self.model.predict([self._encode(config.stack, sentence), self._encode(config.buffer, sentence)])[0,self._index_for(action)]
 
 	def __init__(self) :
 		self.model = None
+
+	def test(self, dataset) :
+		acc = 0.
+		print()
+		for i, (sentence, ref_arcs) in enumerate(dataset) :
+
+			last_config = self.beam_parse(sentence)
+			arcs = last_config.arcs
+			if len(arcs) == len(ref_arcs) :
+				arcs, ref_arcs = set(arcs), set(ref_arcs)
+				acc += len(arcs & ref_arcs) / len(ref_arcs)
+			#print("\033[F\033[K", i, acc/(i+1.))
+		return acc / len(dataset)
 
 	def train(self, dataset, tagger, epochs=3):
 		"""
@@ -127,9 +143,10 @@ class DependencyParser :
 			Y_encoded[i, self.y_codes[y]] = 1.
 		###$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$###
 		# print(XS_encoded)
-
 		# exit()
-		ipt_stack = Input(shape=(tagger.mL,))
+
+		self.model = load_model("parser.model.h5")
+		"""ipt_stack = Input(shape=(tagger.mL,))
 		ipt_buffer = Input(shape=(tagger.mL,))
 		e_stack = tagger.model.get_layer("embedding_1")(ipt_stack)
 		e_buffer = tagger.model.get_layer("embedding_1")(ipt_buffer)
@@ -146,7 +163,8 @@ class DependencyParser :
 		sgd = RMSprop(lr=.01)
 		self.model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 		self.model.fit([XS_encoded,XB_encoded], Y_encoded, epochs=epochs, verbose=1, validation_split=.2)
-		#print(self.model.evaluate([tXS, tXB], tY, batch_size=64))
+		self.model.save("parser.model.h5")
+		#print(self.model.evaluate([tXS, tXB], tY, batch_size=64))"""
 		return self
 
 if __name__ == "__main__" :
@@ -169,10 +187,10 @@ if __name__ == "__main__" :
 		arcs = set(zip(map(int, y), map(int, i)))
 		derivation, last_config = DependencyParser.oracle(arcs)
 		if list(sorted(arcs)) != list(sorted(last_config.arcs)) :
-			print(str(last_config) +"\n\n\n" + message(i,x,y, arcs ,last_config.arcs))
+			#print(str(last_config) +"\n\n\n" + message(i,x,y, arcs ,last_config.arcs))
 			continue
 		dataset.append((["__ROOT__"] + x, derivation))
-	print(len(X), len(dataset))
+	#print(len(X), len(dataset))
 	"""
 	Xtest = corpus.extract_features_for_depency(test_conll)
 	XtestIO = list(map(io.StringIO, Xtest))
@@ -182,4 +200,15 @@ if __name__ == "__main__" :
 	p = DependencyParser()
 	p.train(dataset, nnt)
 	
-	print(p.test(XtestD[:10]))
+	I, X, Y = corpus.extract(corpus.load(test_conll), columns=("index", "token","head"))
+	dataset=[]
+	for i, x, y in zip(I, X, Y) :
+		arcs = set(zip(map(int, y), map(int, i)))
+		derivation, last_config = DependencyParser.oracle(arcs)
+		if list(sorted(arcs)) != list(sorted(last_config.arcs)) :
+			#print(str(last_config) +"\n\n\n" + message(i,x,y, arcs ,last_config.arcs))
+			continue
+		dataset.append((["__ROOT__"] + x, arcs))
+	#print(len(X), len(dataset))
+
+	print(p.test(dataset))
